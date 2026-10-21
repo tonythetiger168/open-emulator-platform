@@ -1,0 +1,35 @@
+# Build outputs
+build/
+obj_dir/
+*.dat
+*.vcd
+*.fst
+*.log
+
+# Simulation / synthesis artifacts
+*.out
+*.o
+*.d
+*.rpt
+*.jou
+*.str
+xsim.dir/
+xcelium.d/
+*.daidir/
+simv*
+csrc/
+*.ucdb
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Editors / OS
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
