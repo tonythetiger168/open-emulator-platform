@@ -1,35 +1,27 @@
-"""Simulated-annealing placement (VPR-style), cost = total half-perimeter WL."""
+"""Simulated-annealing placement of packed CLB blocks (VPR-style, HPWL cost)."""
 import math, random
 
-def _build_nets(mapped, io_pos):
-    """nets: net id -> list of terminals; terminal = ('cell', idx) or ('io', net)."""
-    nets = {}
-    cells = list(mapped.luts) + list(mapped.dffs)
-    for idx, c in enumerate(cells):
-        nets.setdefault(c.out, []).append(("cell", idx))
-        for n in c.ins:
-            nets.setdefault(n, []).append(("cell", idx))
-    for net, _pos in io_pos.items():
-        nets.setdefault(net, []).append(("io", net))
-    # drop nets with <2 terminals (dangling/const-free)
-    return {k: v for k, v in nets.items() if len(v) >= 2}, cells
-
-def place(mapped, fab, seed=1, moves_per_temp=40, t0=5.0, tmin=0.05, alpha=0.92):
+def place(blocks, ext_nets, fab, seed=1, moves_per_temp=40,
+          t0=5.0, tmin=0.05, alpha=0.92):
     rng = random.Random(seed)
-    nets, cells = _build_nets(mapped, fab.io_pos)
     slots = fab.clbs()
-    if len(cells) > len(slots):
-        raise ValueError(f"fabric too small: {len(cells)} cells > {len(slots)} CLBs")
+    nb = len(blocks)
+    if nb > len(slots):
+        raise ValueError(f"fabric too small: {nb} blocks > {len(slots)} CLBs")
     pos = slots[:]
     rng.shuffle(pos)
-    cell_at = pos[:len(cells)]           # idx -> (x,y)
+    blk_at = pos[:nb]
+
+    def tpos(term):
+        kind, ref = term
+        return fab.io_pos[ref] if kind == "io" else blk_at[ref]
 
     def hpwl():
         total = 0
-        for terms in nets.values():
+        for terms in ext_nets.values():
             xs, ys = [], []
-            for kind, ref in terms:
-                x, y = fab.io_pos[ref] if kind == "io" else cell_at[ref]
+            for t in terms:
+                x, y = tpos(t)
                 xs.append(x); ys.append(y)
             total += (max(xs) - min(xs)) + (max(ys) - min(ys))
         return total
@@ -37,29 +29,28 @@ def place(mapped, fab, seed=1, moves_per_temp=40, t0=5.0, tmin=0.05, alpha=0.92)
     cost = hpwl()
     t = t0
     while t > tmin:
-        for _ in range(moves_per_temp * len(cells)):
-            a = rng.randrange(len(cells))
-            if rng.random() < 0.5 and len(cells) < len(slots):
-                # move to a random empty slot
+        for _ in range(moves_per_temp * max(nb, 1)):
+            a = rng.randrange(nb)
+            if rng.random() < 0.5 and nb < len(slots):
                 b_pos = rng.choice(slots)
-                if b_pos in cell_at: continue
-                old = cell_at[a]
-                cell_at[a] = b_pos
+                if b_pos in blk_at: continue
+                old = blk_at[a]
+                blk_at[a] = b_pos
                 new = hpwl()
                 d = new - cost
                 if d <= 0 or rng.random() < math.exp(-d / t):
                     cost = new
                 else:
-                    cell_at[a] = old
+                    blk_at[a] = old
             else:
-                b = rng.randrange(len(cells))
+                b = rng.randrange(nb)
                 if a == b: continue
-                cell_at[a], cell_at[b] = cell_at[b], cell_at[a]
+                blk_at[a], blk_at[b] = blk_at[b], blk_at[a]
                 new = hpwl()
                 d = new - cost
                 if d <= 0 or rng.random() < math.exp(-d / t):
                     cost = new
                 else:
-                    cell_at[a], cell_at[b] = cell_at[b], cell_at[a]
+                    blk_at[a], blk_at[b] = blk_at[b], blk_at[a]
         t *= alpha
-    return cell_at, cost, nets, cells
+    return blk_at, cost

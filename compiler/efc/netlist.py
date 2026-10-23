@@ -115,7 +115,7 @@ class Elaborator:
             raise ValueError(f"{name} assigned in always but not declared reg")
         qs = []
         for i, d in enumerate(dnets):
-            q = self.nl.new_net(f"{name}_q[{i}]" if w > 1 else f"{name}_q")
+            q = self.nl.new_net(f"{name}[{i}]" if w > 1 else name)
             self.nl.add("DFF", [d, clk], q, name=f"{name}[{i}]")
             qs.append(q)
         self.sig[name] = qs

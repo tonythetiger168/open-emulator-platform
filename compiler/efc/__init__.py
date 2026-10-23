@@ -1,11 +1,13 @@
-"""efc — Emulator FPGA Compiler (single-FPGA MVP).
+"""efc — Emulator FPGA Compiler (single-FPGA, targeting AMD VP1902).
 
 Pipeline (Synplify Pro analogue):
-  verilog.py  frontend parse        ~ Synplify HDL compiler / HDL Analyst
-  netlist.py  elaborate, bit-blast  ~ generic netlist (RTL view)
-  techmap.py  gates -> LUTK         ~ technology mapper (Technology view)
-  place.py    SA placement          ~ (self-developed P&R, VPR-style)
-  route.py    PathFinder routing    ~ (self-developed P&R)
-  timing.py   logic depth           ~ static timing estimate
+  verilog.py  frontend parse             ~ Synplify HDL compiler
+  netlist.py  elaborate, bit-blast       ~ HDL Analyst (RTL view)
+  techmap.py  gates -> LUT6 + INIT       ~ technology mapper (Technology view)
+  pack.py     CLB packing (8 LUT6+16 FF) ~ VP1902 slice structure
+  place.py    SA placement (block level) ~ self-developed P&R, VPR-style
+  route.py    PathFinder routing         ~ self-developed P&R
+  timing.py   logic depth                ~ static timing estimate
+  edif.py     EDIF 2.0.0 + XDC writers   ~ Vivado real-device path
 """
-__version__ = "0.1.0"
+__version__ = "0.2.0"

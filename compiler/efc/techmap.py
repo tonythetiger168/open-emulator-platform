@@ -1,9 +1,8 @@
-"""Technology mapping: generic gates -> K-LUTs (Synplify 'mapper' analogue).
+"""Technology mapping: generic gates -> LUT6 (VP1902 CLB slice native).
 
-Simple greedy cone-merge: a gate merges into its single fanout LUT when the
-combined input count fits K. DFFs are never merged. Constants are dropped
-(const propagation into LUT truth handled later; here they just occupy inputs
-and get pruned by mapper when possible).
+Greedy cone-merge (a gate merges into its single fanout LUT when the combined
+input count fits K), plus cone bookkeeping so every surviving LUT can produce
+its INIT truth table for EDIF/unisim output.
 """
 from .netlist import Netlist, Cell, CONST0, CONST1
 
@@ -11,23 +10,25 @@ MERGEABLE = {"AND2", "OR2", "XOR2", "NOT", "MUX2"}
 
 class LutNet:
     def __init__(self):
-        self.luts = []     # Cell-like: type 'LUTK', ins, out
+        self.luts = []        # Cell: type 'LUTK', ins (boundary nets), out
         self.dffs = []
         self.inputs = []
         self.outputs = []
         self.net_names = {}
+        self.cones = {}       # id(lut cell) -> {net: driver gate Cell} inside cone
 
-def techmap(nl: Netlist, k: int = 4):
-    # fanout of each net
+def techmap(nl: Netlist, k: int = 6):
     fanout = {}
     for c in nl.cells:
         for n in c.ins:
             fanout.setdefault(n, []).append(c)
 
-    # initial LUT input sets for mergeable cells
     lut_in = {id(c): set(c.ins) for c in nl.cells if c.type in MERGEABLE}
+    # cone membership: survivor cell id -> {internal net: driver cell}
+    cone = {id(c): {} for c in nl.cells if c.type in MERGEABLE}
+    surv_of = {}            # absorbed cell id -> survivor cell id
 
-    merged_into = {}       # cell id -> survivor cell id
+    merged_into = {}
     po_nets = set(nl.outputs)
     changed = True
     while changed:
@@ -44,9 +45,13 @@ def techmap(nl: Netlist, k: int = 4):
                 union = (lut_in[id(f)] | lut_in[id(c)]) - {c.out}
                 if len(union) <= k:
                     lut_in[id(f)] = union
+                    # fold c's cone into f, keyed by output nets
+                    fc = cone[id(f)]
+                    fc[c.out] = c
+                    for n, drv in cone[id(c)].items():
+                        fc[n] = drv
                     merged_into[id(c)] = id(f)
-                    # redirect fanout bookkeeping: c's net now driven inside f
-                    fanout[c.out] = []     # consumed internally
+                    fanout[c.out] = []
                     changed = True
 
     out = LutNet()
@@ -58,16 +63,49 @@ def techmap(nl: Netlist, k: int = 4):
         elif c.type in MERGEABLE:
             if id(c) in merged_into:
                 continue
-            ins = [n for n in lut_in[id(c)] if n not in (CONST0, CONST1)]
-            out.luts.append(Cell(f"LUT{k}", sorted(ins), c.out, c.name))
+            ins = sorted(n for n in lut_in[id(c)] if n not in (CONST0, CONST1))
+            n_in = max(1, len(ins))
+            lut = Cell(f"LUT{n_in}", ins, c.out, c.name)
+            out.luts.append(lut)
+            cc = dict(cone[id(c)])
+            cc[c.out] = c            # survivor's own gate drives the LUT output
+            out.cones[id(lut)] = cc
     return out, merged_into
 
+# ---------- INIT truth-table computation ----------
+def _eval_gate(t, v):
+    if t == "AND2": return v[0] & v[1]
+    if t == "OR2":  return v[0] | v[1]
+    if t == "XOR2": return v[0] ^ v[1]
+    if t == "NOT":  return (~v[0]) & 1
+    if t == "MUX2": return v[1] if v[0] else v[2]   # sel ? a : b
+    raise ValueError(t)
+
+def lut_init(lut: Cell, cone: dict) -> str:
+    """INIT as an uppercase hex string covering 2^len(ins) entries."""
+    ins = lut.ins
+    idx = {n: i for i, n in enumerate(ins)}
+
+    def val(net, bits):
+        if net in idx:
+            return (bits >> idx[net]) & 1
+        if net == CONST0: return 0
+        if net == CONST1: return 1
+        drv = cone[net]
+        return _eval_gate(drv.type, [val(n, bits) for n in drv.ins])
+
+    init = 0
+    for bits in range(1 << len(ins)):
+        if val(lut.out, bits):
+            init |= 1 << bits
+    width_hex = max(1, (1 << len(ins)) // 4)
+    return f"{init:0{width_hex}X}"
+
 def stats(nl: Netlist, mapped, k):
-    luts, dffs = mapped.luts, mapped.dffs
     return {
         "gates_in": len(nl.cells),
-        f"LUT{k}": len(luts),
-        "DFF": len(dffs),
+        "LUTs": len(mapped.luts),
+        "DFF": len(mapped.dffs),
         "PI": len(nl.inputs),
         "PO": len(nl.outputs),
     }
