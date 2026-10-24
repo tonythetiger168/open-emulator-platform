@@ -1,26 +1,29 @@
-"""CLI: single-FPGA compile flow targeting VP1902.
+"""CLI: single-FPGA compile flow, device described by a data-driven arch spec.
 
   python -m efc.cli examples/alu4.v --grid 8 --tracks 8 \
-      --edif out/alu4.edif --xdc out/alu4.xdc
+      --arch vp1902 --edif out/alu4.edif --xdc out/alu4.xdc
 """
 import argparse, json, sys
 from .verilog import parse_verilog
 from .netlist import elaborate
 from .techmap import techmap, stats
 from .pack import pack
-from .fabric import build_fabric, utilization, VP1902
+from .arch import load_arch, DEFAULT_ARCH
+from .fabric import build_fabric, utilization
 from .place import place
 from .route import route
 from .timing import logic_depth
 from .edif import write_edif, write_xdc
 
-def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None):
+def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
+                 arch=DEFAULT_ARCH):
+    spec = load_arch(arch) if not hasattr(arch, "envelope") else arch
     src = open(path, encoding="utf-8").read()
     mod = parse_verilog(src)
     nl = elaborate(mod)
-    mapped, _merged = techmap(nl, k=6)          # VP1902 native LUT6
+    mapped, _merged = techmap(nl, k=spec.clb.lut_k)   # native LUT-K from arch
     blocks, ext_nets = pack(mapped)
-    fab = build_fabric(grid, tracks, nl.inputs, nl.outputs)
+    fab = build_fabric(grid, tracks, nl.inputs, nl.outputs, arch=spec)
     blk_at, hpwl = place(blocks, ext_nets, fab, seed=seed)
 
     # routing demands: driver terminal first
@@ -47,15 +50,17 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None):
 
     n_luts = len(mapped.luts)
     n_ffs = len(mapped.dffs)
-    util = utilization(n_luts, n_ffs)
+    util = utilization(n_luts, n_ffs, arch=spec)
     rep = {
         "module": mod.name,
-        "target": VP1902["part"],
-        **stats(nl, mapped, 6),
+        "arch": spec.name,
+        "target": spec.part,
+        **stats(nl, mapped, spec.clb.lut_k),
         "CLB_used": len(blocks),
-        "VP1902_LUT6_util_%": round(util["LUT6"], 6),
-        "VP1902_FF_util_%": round(util["FF"], 6),
-        "fabric": f"{grid}x{grid} CLB(logical), {tracks} tracks/ch",
+        f"{spec.name.upper()}_LUT6_util_%": round(util["LUT6"], 6),
+        f"{spec.name.upper()}_FF_util_%": round(util["FF"], 6),
+        "fabric": f"{grid}x{grid} CLB(logical), {tracks} tracks/ch, "
+                  f"sb={spec.switch_block.type}(Fs={spec.switch_block.fs})",
         "placement_hpwl": hpwl,
         "route_wirelength": rr["wirelength"],
         "route_max_channel": f"{rr['max_channel']}/{tracks}",
@@ -76,12 +81,14 @@ def main(argv=None):
     ap.add_argument("--grid", type=int, default=8)
     ap.add_argument("--tracks", type=int, default=8)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--arch", default=DEFAULT_ARCH,
+                    help="arch name in compiler/arch/ or path to a JSON spec")
     ap.add_argument("--edif", help="write EDIF 2.0.0 netlist for Vivado")
     ap.add_argument("--xdc", help="write XDC constraints skeleton")
     ap.add_argument("--json")
     args = ap.parse_args(argv)
     rep = compile_file(args.verilog, args.grid, args.tracks, args.seed,
-                       edif=args.edif, xdc=args.xdc)
+                       edif=args.edif, xdc=args.xdc, arch=args.arch)
     for k, v in rep.items():
         print(f"{k:24s}: {v}")
     if args.json:
