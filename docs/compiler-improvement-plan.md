@@ -21,11 +21,13 @@
 
 ### Phase A：timing-driven 地基
 
-1. **Arch 描述檔化**（學 VPR architecture XML）
-   現況 `fabric.py` 為硬編碼 dict。改為 data-driven 架構描述：CLB 內部結構、
+1. **Arch 描述檔化**（學 VPR architecture XML）—— ✅ **已完成（v0.3，2026-10-25）**
+   原況 `fabric.py` 為硬編碼 dict。改為 data-driven 架構描述：CLB 內部結構、
    switch block 類型（subset/Wilton/universal）、wire segment 長度、delay/RC 表。
    是所有 timing-driven 工作的地基，也是日後切換目標元件（含 OpenXC7 靶機）的開關。
-   工作量：小。**最先做。**
+   落地：`compiler/arch/vp1902.json` + `efc/arch.py`；envelope/CLB/segment/
+   switch block/IO 策略全部資料驅動，`--arch` 可切換元件；alu4 迴歸數字不變，
+   新增 `tests/test_arch.py` 6 項。
 
 2. **Timing 引擎升級**：logic depth → Elmore RC + STA，產出 per-net criticality。
    沒有 criticality，placer 與 router 都無法 timing-driven。
@@ -74,7 +76,7 @@
 ## 3. 執行順序
 
 ```
-1 → 2 → 3 → 4    （一輪把 P&R 從「能跑」拉到「timing-driven」）
+1 ✅（v0.3）→ 2 → 3 → 4    （一輪把 P&R 從「能跑」拉到「timing-driven」）
 → 5              （mapping 收口）
 → 10 ‖ 9         （正確性驗證與真機靶機並行）
 → 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
@@ -95,3 +97,4 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
 
 - v1.0（2026-10-25）：初版。對標 VTR/VPR 9、nextpnr、ABC/Yosys、OpenFPGA、
   RapidWright、OpenXC7/prjuray、VPR-Evolve；排定 Phase A/B/C 共 12 項改進。
+- v1.1（2026-10-25）：Phase A 第 1 項（arch 描述檔化）標記完成（efc v0.3）。

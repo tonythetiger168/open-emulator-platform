@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-23 ｜ v0.2（VP1902 目標 + Vivado 路徑）
+> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v0.3（arch 描述檔化）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -12,7 +12,8 @@
 
 - 參考藍本：**Synplify Pro**（compile → elaborate → map → optimize）。
 - P&R：**自研**（Synplify 本身不含 P&R；此部分參考學術界 VPR 架構）。
-- 目標元件：**AMD Versal Premium VP1902**（18.5M SLC / 8.46M LUT6 / 16.92M FF）。
+- 目標元件：**AMD Versal Premium VP1902**（18.5M SLC / 8.46M LUT6 / 16.92M FF），
+  以 **data-driven 架構描述檔**（`compiler/arch/vp1902.json`）定義。
 
 ## 2. Synplify Pro 架構回顧（我們參考什麼）
 
@@ -23,7 +24,7 @@
    carry chain、記憶體與 DSP 推斷）。
 5. **輸出**：EDIF netlist + 約束，交給廠商 P&R（Vivado）——Synplify 到這層為止。
 
-## 3. efc pipeline 對照（v0.2）
+## 3. efc pipeline 對照（v0.3）
 
 ```
 verilog.py   語言前端（lexer/parser/AST）            ~ HDL Compiler
@@ -31,6 +32,8 @@ netlist.py   展開 + bit-blast → generic gates        ~ HDL Analyst (RTL view
                AND2/OR2/XOR2/NOT/MUX2/DFF
 techmap.py   gates → LUT6（greedy cone-merge）
                + cone 追蹤 + INIT 真值表計算         ~ Technology Mapper (Tech view)
+arch.py      架構描述檔 loader（JSON）               ~ VPR architecture XML
+               CLB 結構 / segment 長度+RC / switch block / IO 策略
 pack.py      CLB 打包（8×LUT6+16FF，LUT→DFF 配對）   ~ VP1902 slice 結構
 place.py     SA placement（block 級，HPWL）          ← 自研 P&R（VPR 式）
 route.py     PathFinder negotiated-congestion        ← 自研 P&R
@@ -39,9 +42,9 @@ edif.py      EDIF 2.0.0 + XDC 輸出                   ~ Synplify 出貨格式 �
 ```
 
 資料結構主線：`AST → Netlist(gates) → LutNet(LUT6+DFF+INIT) →
-blocks(CLB) → placement → routes → EDIF/XDC`。
-每一級都是純資料，pass 之間無隱含狀態——為日後 partition pass
-（插在 techmap 與 pack 之間）預留結構。
+blocks(CLB) → placement → routes → EDIF/XDC`，arch spec 由 `arch.py`
+載入後貫穿 fabric/pack/cli。每一級都是純資料，pass 之間無隱含狀態——
+為日後 partition pass（插在 techmap 與 pack 之間）預留結構。
 
 ## 4. VP1902 目標與自研 P&R
 
@@ -57,21 +60,38 @@ blocks(CLB) → placement → routes → EDIF/XDC`。
 | SelectIO | 2,328 |
 
 編譯報表直接給出對真機的利用率（LUT6/FF/CLB %）。
+envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 
-### 4.2 CLB packing（pack.py）
+### 4.2 架構描述檔（arch.py + arch/vp1902.json，v0.3 新增）
+
+對標 VPR architecture XML，把目標元件從程式碼中抽離為資料：
+
+- **clb**：LUT/FF 數、LUT K、block timing（t_lut / t_clkq / t_setup 估計值）。
+- **routing.segments**：wire segment 型別表——長度（L1/L2/L6）、通道佔比、
+  R/C（供 Elmore 延遲模型，`Segment.elmore_ns()` 已備）。
+- **routing.switch_block**：拓撲型別（wilton）與 Fs。
+- **io**：perimeter 擺放策略（input→west/north，output→east/south）。
+- `--arch` 可指定 `arch/` 下的名稱或任一 JSON 路徑——**換元件不改演算法**，
+  這也是 OpenXC7 靶機（Kintex-7）與 timing-driven P&R 的前置開關。
+
+誠實標記：timing 與 R/C 是邏輯模型估計值，非矽真值（VP1902 詳細 timing
+未公開）；v0.3 的 grid P&R 仍為 unit-length 邊，segment 表供後續 pass 消費。
+
+### 4.3 CLB packing（pack.py）
 
 - LUT→DFF 獨佔配對放同一 CLB（經典 BLE 模式），剩餘 cell 以共享 net
   最多的 first-fit 裝箱；容量上限 8 LUT6 + 16 FF / CLB。
 - packing 後產生 block 級外部網表，供 block-level placement/routing。
 
-### 4.3 P&R
+### 4.4 P&R
 
 - Placement：VPR 式模擬退火，成本 = 全網表 HPWL；動作為 block 交換/移位。
 - Routing：PathFinder negotiated congestion，rip-up & re-route 全網表迭代，
   history penalty 收斂；邏輯格陣 N×N、通道容量 = tracks。
-- 後續：timing-driven 成本項、switch block 建模、wire segment 長度。
+- 後續：timing-driven 成本項、switch block 消費、wire segment 長度
+  （arch 描述檔已備好資料，見改進計劃 Phase A 第 2–4 項）。
 
-### 4.4 Vivado 真機路徑（edif.py）
+### 4.5 Vivado 真機路徑（edif.py）
 
 - EDIF 2 0 0：外部庫 `hdi_primitives`（LUT1–6/FDRE，同 Synplify 慣例），
   instance 帶 `INIT` property（由 cone 真值表計算）；bus port 打平為純量
@@ -79,7 +99,7 @@ blocks(CLB) → placement → routes → EDIF/XDC`。
 - XDC：`create_clock` + 佔位 PACKAGE_PIN（真實 pinout 待 ProtoBoard 板檔）。
 - **誠實標記**：EDIF 尚未在真 Vivado 上驗證，首次上機前需 `link_design` 檢查。
 
-### 4.5 誠實限制
+### 4.6 誠實限制
 
 **VP1902 bitstream 格式未公開**，任何第三方都無法直接產生可燒錄檔案
 （開源逆向版圖：Project X-Ray = 7-series；Project U-Ray = UltraScale/+
@@ -88,7 +108,7 @@ blocks(CLB) → placement → routes → EDIF/XDC`。
 可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
 做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
-## 5. 驗證結果（v0.2，examples/alu4.v，8×8 邏輯格、8 tracks）
+## 5. 驗證結果（v0.3，examples/alu4.v，8×8 邏輯格、8 tracks）
 
 | 指標 | 值 |
 |---|---|
@@ -101,14 +121,19 @@ blocks(CLB) → placement → routes → EDIF/XDC`。
 | logic depth | 2 |
 | EDIF/XDC | 產出 OK，結構含 LUTn INIT 與 FDRE |
 
+v0.2 → v0.3 迴歸：上述數字**完全一致**（arch 檔化為純重構，行為不變）。
+
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
+`tests/test_arch.py` 6 項（v0.3 新增）：預設/路徑載入、未知 arch 報錯、
+segment 排序與覆蓋、利用率公式迴歸、IO 策略生效。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
 1. 語言子集擴充：concat/切片/case、FSM extraction（對齊 Synplify FSM Compiler）。
 2. LUT mapping 換 cut-enumeration（FlowMap 式）；BRAM/DSP58/CARRY8 推斷。
-3. switch block 建模 + timing-driven P&R + 佈線延遲回填。
+3. switch block 建模 + timing-driven P&R + 佈線延遲回填
+   （消費 arch 描述檔的 segment/R-C 表；見《改進計劃》Phase A 第 2–4 項）。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
    對齊《Emulator 容量與架構對標分析》的 1→2→4→8 擴展路線。
@@ -123,6 +148,8 @@ MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
    代價是 overlay 面積 overhead 約 2–10×，故僅適合中小設計快速迭代，
    不作為 100M 閘級 emulator 主線。
 
+逐項展開與優先序見 `docs/compiler-improvement-plan.md`。
+
 ## 版本紀錄
 
 - v0.1（2026-10-23）：MVP pipeline，LUT4，抽象 fabric。
@@ -130,3 +157,7 @@ MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
   block 級 P&R、真機資源利用率、EDIF/XDC 輸出。
 - roadmap 增補（2026-10-23）：§4.5 補開源 bitstream 版圖說明；
   新增第 6 項（OpenXC7 驗證線）與第 7 項（shell+patch 加速線）。
+- v0.3（2026-10-25）：**arch 描述檔化**（改進計劃 Phase A 第 1 項）——
+  `arch/vp1902.json` + `efc/arch.py`；envelope/CLB/segment/switch block/IO
+  策略全部改為資料驅動，`--arch` 可切換目標元件；行為零迴歸，
+  新增 `tests/test_arch.py` 6 項。
