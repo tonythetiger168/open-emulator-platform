@@ -1,0 +1,97 @@
+# efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
+
+> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v1.0
+> 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
+> 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
+> roadmap 的展開與具體化。
+
+## 1. 對標專案盤點
+
+| 專案 | 定位 | 對 efc 的核心啟發 |
+|---|---|---|
+| [verilog-to-routing (VTR/VPR)](https://github.com/verilog-to-routing/vtr-verilog-to-routing) | 學術界 P&R 金標準 | v9 的 RLPlace（RL agent 動態選擇 SA move 類型）、smart centroid 初始佈局、AIR router 的 flat routing 與空間分割平行化、floorplanning constraints；placement / routing 分別比 VTR 8 快 4× / 2.2× 且 QoR 更佳 |
+| [nextpnr](https://github.com/YosysHQ/nextpnr) | 開源商用級 P&R（1.8k★） | HeAP 解析式佈局：二次 wirelength 求解 + bound2bound 權重（criticality 驅動）+ 迭代 spreading / legalization，再 SA refine；router2 用 directed search；timing criticality（0.0=don't care～1.0=關鍵路徑）貫穿 place/route |
+| [ABC](https://github.com/berkeley-abc/abc) / [Yosys](https://github.com/YosysHQ/yosys) | 邏輯綜合（VTR 的前端） | AIG 優化 + cut-enumeration（priority cuts）LUT mapping——替換 efc 貪婪 cone-merge 的正解 |
+| [OpenFPGA](https://github.com/lnis-uofu/OpenFPGA) | FPGA fabric 生成框架（1.2k★） | bitstream 對輸入 netlist 的 formal verification、自動產生全級 testbench——compiler 正確性驗證的範本 |
+| [RapidWright](https://github.com/Xilinx/RapidWright) | AMD 官方 Vivado 快速組裝框架（395★） | pre-implemented blocks / stamped modules + RWRoute——shell+patch 加速線的現成載體 |
+| [OpenXC7](https://github.com/openXC7) / [prjuray](https://github.com/f4pga/prjuray) | 7-series 開放 bitstream；UltraScale/+ 文件化中 | 驗證線落點：efc → nextpnr-xilinx → 真 bitstream 的無 Vivado 迴路 |
+| VPR-Evolve（2026，arXiv:2602.13594） | LLM 多 agent 演化 P&R 程式碼 | 前瞻方向：對 P&R 原始碼做 per-design 演化，CPD 最多降 9.8%、runtime 最多降 79.3% |
+
+## 2. 改進計劃（依優先序）
+
+### Phase A：timing-driven 地基
+
+1. **Arch 描述檔化**（學 VPR architecture XML）
+   現況 `fabric.py` 為硬編碼 dict。改為 data-driven 架構描述：CLB 內部結構、
+   switch block 類型（subset/Wilton/universal）、wire segment 長度、delay/RC 表。
+   是所有 timing-driven 工作的地基，也是日後切換目標元件（含 OpenXC7 靶機）的開關。
+   工作量：小。**最先做。**
+
+2. **Timing 引擎升級**：logic depth → Elmore RC + STA，產出 per-net criticality。
+   沒有 criticality，placer 與 router 都無法 timing-driven。
+
+3. **Router 換 directed search**：純 BFS → A* + lookahead
+   （VPR timing-driven PathFinder / nextpnr router2）。
+   注意：VTR 8 已將 BFS router 整個移除——BFS 路線已被證明是死路，
+   趁 efc 規模小就換掉。
+
+4. **Placer 初始解**：smart centroid（VTR 9）或 HeAP 式解析 seeding
+   （quadratic wirelength + bound2bound + spreading / legalization），再 SA refine。
+   VTR 9 證明「高品質初始解 + 有方向的 move」是 runtime 與 QoR 雙贏。
+
+5. **LUT mapping 換 cut-enumeration**（ABC / FlowMap 式 priority cuts），
+   替換貪婪 cone-merge；與 1–4 做完後 QoR 收口。
+
+### Phase B：結構對齊商用流程
+
+6. **Prepacking molecules**（VPR prepacker）：CARRY8 chain、LUT-FF 強制配對、
+   BRAM / DSP58 作為不可拆分子進 packer，對齊 VP1902 硬體結構。
+
+7. **Floorplanning constraints**（VTR 9 新增能力）：對應 emulator 的 module 級
+   floorplan，更是 multi-FPGA partition（Phase 2）的前置能力。戰略價值高。
+
+8. **平行 / flat routing**（VTR 9 AIR router：空間分割平行化降 2.4× routing 時間）：
+   設計規模上來後再做，為大設計準備。
+
+### Phase C：正確性驗證與生態落地
+
+9. **OpenXC7 驗證線落地**（原 roadmap 第 6 項具體化）：
+   efc 輸出 nextpnr-xilinx 可接受的 netlist；靶機選 Kintex-7（xc7k325t，
+   OpenXC7 demo 最成熟），打通「efc → 真 bitstream → 上板」的無 Vivado 迴路。
+
+10. **LEC 驗證迴圈**（學 OpenFPGA / VTR flow）：每級 pass 後做 SAT-based
+    equivalence check（可呼叫 abc `cec`）。對自研 compiler，這比任何單項
+    QoR 改進都重要。
+
+11. **QoR 回歸系統**（學 VTR golden QoR tracking）：建立 benchmark corpus
+    （MCNC → Koios 級），每次改動追蹤 CPD / wirelength / runtime 三項指標，
+    防止改 A 壞 B。
+
+12. **shell+patch 線用 RapidWright 落地**（原 roadmap 第 7 項具體化）：
+    pre-implemented blocks 直接對應「固定 shell + 局部 patch」，站在 AMD 官方
+    開源框架上做，省去自行操作 DCP。
+
+## 3. 執行順序
+
+```
+1 → 2 → 3 → 4    （一輪把 P&R 從「能跑」拉到「timing-driven」）
+→ 5              （mapping 收口）
+→ 10 ‖ 9         （正確性驗證與真機靶機並行）
+→ 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
+→ 8, 11, 12      （按資源排）
+```
+
+RL / ML move selection（RLPlace、VPR-Evolve 路線）留作前瞻：等 benchmark
+corpus 建立後，再考慮用 RL agent 或 LLM-driven evolution 對自家 codebase
+做 QoR 演化。
+
+## 4. 誠實聲明
+
+efc 目前約 1,500 行 Python；對標專案為 10 萬～百萬行 C++。本計劃的取徑是
+**萃取演算法與架構設計，不是重寫**。當 runtime 成為瓶頸時，選項是將核心
+pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python 層硬扛效能。
+
+## 版本紀錄
+
+- v1.0（2026-10-25）：初版。對標 VTR/VPR 9、nextpnr、ABC/Yosys、OpenFPGA、
+  RapidWright、OpenXC7/prjuray、VPR-Evolve；排定 Phase A/B/C 共 12 項改進。
