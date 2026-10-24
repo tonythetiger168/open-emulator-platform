@@ -56,4 +56,7 @@ python3 -m unittest discover tests -v
 - [ ] cut-enumeration LUT mapping（FlowMap 式）、BRAM/DSP58 推斷、CARRY8
 - [ ] switch block + timing-driven P&R
 - [x] EDIF/XDC 輸出接 Vivado（v0.2；真機驗證待跑）
+- [ ] OpenXC7（UltraScale+）目標後端：不需 Vivado 的端到端真 bitstream 驗證靶機
+- [ ] 固定 shell + runtime patch（overlay/PR）評估：迭代編譯去 Vivado 化；
+      注意 overlay 面積 overhead 約 2–10×，僅適合中小設計快速迭代
 - [ ] multi-FPGA partition（對齊 roadmap Phase 2，參考 Siemens VPS）

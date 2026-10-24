@@ -81,10 +81,12 @@ blocks(CLB) → placement → routes → EDIF/XDC`。
 
 ### 4.5 誠實限制
 
-**VP1902 bitstream 格式未公開**，任何第三方都無法直接產生可燒錄檔案。
+**VP1902 bitstream 格式未公開**，任何第三方都無法直接產生可燒錄檔案
+（開源逆向版圖：Project X-Ray = 7-series；Project U-Ray = UltraScale/+
+部分文件；Versal 為零，且配置走 PDI 封裝 + PMC/PLM 開機韌體，難度更高）。
 自研 P&R 的價值：① partition 前的演算法練兵場；② placement/routing 決策
-可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5）做教學板可
-直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
+可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
+做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
 ## 5. 驗證結果（v0.2，examples/alu4.v，8×8 邏輯格、8 tracks）
 
@@ -110,9 +112,21 @@ MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
    對齊《Emulator 容量與架構對標分析》的 1→2→4→8 擴展路線。
+6. **OpenXC7（UltraScale+）後端（驗證線）**：efc → OpenXC7
+   （Yosys / nextpnr-xilinx / prjuray）出真 bitstream，全程無 Vivado。
+   元件容量小（Zynq UltraScale+ 級），價值在於給 compiler 一個
+   可上真機的端到端正確性靶機。
+7. **固定 shell + runtime patch 評估（加速線）**：Vivado 僅跑一次產生
+   shell bitstream，後續設計編譯只出 patch data（參考 Nexus 的固定
+   bitstream + 指令編譯、PRflow/HiPR 的 partial reconfiguration 分頁、
+   學術界 overlay 做法）。預期把迭代編譯從小時級降到秒~分鐘級；
+   代價是 overlay 面積 overhead 約 2–10×，故僅適合中小設計快速迭代，
+   不作為 100M 閘級 emulator 主線。
 
 ## 版本紀錄
 
 - v0.1（2026-10-23）：MVP pipeline，LUT4，抽象 fabric。
 - v0.2（2026-10-23）：目標 VP1902——LUT6 原生映射 + INIT、CLB packing、
   block 級 P&R、真機資源利用率、EDIF/XDC 輸出。
+- roadmap 增補（2026-10-23）：§4.5 補開源 bitstream 版圖說明；
+  新增第 6 項（OpenXC7 驗證線）與第 7 項（shell+patch 加速線）。
