@@ -12,4 +12,4 @@ Pipeline (Synplify Pro analogue):
   timing.py   STA (Elmore + criticality) ~ Timing Analyst
   edif.py     EDIF 2.0.0 + XDC writers   ~ Vivado real-device path
 """
-__version__ = "0.5.0"
+__version__ = "0.6.0"
