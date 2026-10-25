@@ -12,11 +12,11 @@ from .arch import load_arch, DEFAULT_ARCH
 from .fabric import build_fabric, utilization
 from .place import place
 from .route import route
-from .timing import logic_depth
+from .timing import logic_depth, sta
 from .edif import write_edif, write_xdc
 
 def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
-                 arch=DEFAULT_ARCH):
+                 arch=DEFAULT_ARCH, clock_ns=10.0):
     spec = load_arch(arch) if not hasattr(arch, "envelope") else arch
     src = open(path, encoding="utf-8").read()
     mod = parse_verilog(src)
@@ -67,11 +67,20 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
         "route_overused_channels": rr["overused"],
         "logic_depth_LUT": logic_depth(mapped),
     }
+    # placement-aware STA (Elmore wire delay from arch spec)
+    st = sta(mapped, ext_nets, blk_at, fab, clock_ns=clock_ns, arch=spec)
+    rep.update({
+        "clock_ns": clock_ns,
+        "critical_path_ns": st["critical_path_ns"],
+        "est_fmax_mhz": st["fmax_mhz"],
+        "worst_slack_ns": st["worst_slack_ns"],
+        "timing_violated": st["violated"],
+    })
     if edif:
         write_edif(edif, mod.name, nl, mapped)
         rep["edif"] = edif
     if xdc:
-        write_xdc(xdc, nl)
+        write_xdc(xdc, nl, clock_period_ns=clock_ns)
         rep["xdc"] = xdc
     return rep
 
@@ -81,6 +90,8 @@ def main(argv=None):
     ap.add_argument("--grid", type=int, default=8)
     ap.add_argument("--tracks", type=int, default=8)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--clock", type=float, default=10.0,
+                    help="clock period in ns for STA and XDC create_clock")
     ap.add_argument("--arch", default=DEFAULT_ARCH,
                     help="arch name in compiler/arch/ or path to a JSON spec")
     ap.add_argument("--edif", help="write EDIF 2.0.0 netlist for Vivado")
@@ -88,12 +99,14 @@ def main(argv=None):
     ap.add_argument("--json")
     args = ap.parse_args(argv)
     rep = compile_file(args.verilog, args.grid, args.tracks, args.seed,
-                       edif=args.edif, xdc=args.xdc, arch=args.arch)
+                       edif=args.edif, xdc=args.xdc, arch=args.arch,
+                       clock_ns=args.clock)
     for k, v in rep.items():
         print(f"{k:24s}: {v}")
     if args.json:
         json.dump(rep, open(args.json, "w"), indent=2, ensure_ascii=False)
-    return 0 if rep["route_overused_channels"] == 0 else 1
+    ok = rep["route_overused_channels"] == 0 and not rep["timing_violated"]
+    return 0 if ok else 1
 
 if __name__ == "__main__":
     sys.exit(main())

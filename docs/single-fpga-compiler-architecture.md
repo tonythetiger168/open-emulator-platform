@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v0.3（arch 描述檔化）
+> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v0.4（Elmore STA + criticality）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -24,7 +24,7 @@
    carry chain、記憶體與 DSP 推斷）。
 5. **輸出**：EDIF netlist + 約束，交給廠商 P&R（Vivado）——Synplify 到這層為止。
 
-## 3. efc pipeline 對照（v0.3）
+## 3. efc pipeline 對照（v0.4）
 
 ```
 verilog.py   語言前端（lexer/parser/AST）            ~ HDL Compiler
@@ -37,7 +37,7 @@ arch.py      架構描述檔 loader（JSON）               ~ VPR architecture X
 pack.py      CLB 打包（8×LUT6+16FF，LUT→DFF 配對）   ~ VP1902 slice 結構
 place.py     SA placement（block 級，HPWL）          ← 自研 P&R（VPR 式）
 route.py     PathFinder negotiated-congestion        ← 自研 P&R
-timing.py    logic depth 估算                        ~ Timing Analyst（簡化）
+timing.py    STA：Elmore RC + slack/criticality      ~ Timing Analyst
 edif.py      EDIF 2.0.0 + XDC 輸出                   ~ Synplify 出貨格式 → Vivado
 ```
 
@@ -83,7 +83,19 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
   最多的 first-fit 裝箱；容量上限 8 LUT6 + 16 FF / CLB。
 - packing 後產生 block 級外部網表，供 block-level placement/routing。
 
-### 4.4 P&R
+### 4.4 STA（v0.4，timing.py）
+
+- 延遲模型：LUT = arch `t_lut_ns`；DFF = `t_ff_clkq_ns` / `t_setup_ns`；
+  wire = 依 placement 的 per-net HPWL（tile 數）經 `arch.segment_for()`
+  選 segment，Elmore 估算 `elmore_ns × ⌈hpwl/len⌉`；CLB 內部 net 記 0。
+- 前向 arrival → 端點（DFF d：T−t_setup；PO：T）→ 反向 required →
+  per-net slack 與 **criticality（VPR 式：1 − slack/T）**。
+- 報表：critical_path_ns / est_fmax_mhz / worst_slack_ns / violated；
+  `--clock` 控制目標週期，違例時 CLI exit 1。criticality 供 Phase A
+  第 3–4 項 timing-driven router/placer 直接消費。
+- 誠實標記：wire delay 依 HPWL 估算，尚未依真實 routing 拓撲回填。
+
+### 4.5 P&R
 
 - Placement：VPR 式模擬退火，成本 = 全網表 HPWL；動作為 block 交換/移位。
 - Routing：PathFinder negotiated congestion，rip-up & re-route 全網表迭代，
@@ -91,7 +103,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 - 後續：timing-driven 成本項、switch block 消費、wire segment 長度
   （arch 描述檔已備好資料，見改進計劃 Phase A 第 2–4 項）。
 
-### 4.5 Vivado 真機路徑（edif.py）
+### 4.6 Vivado 真機路徑（edif.py）
 
 - EDIF 2 0 0：外部庫 `hdi_primitives`（LUT1–6/FDRE，同 Synplify 慣例），
   instance 帶 `INIT` property（由 cone 真值表計算）；bus port 打平為純量
@@ -99,7 +111,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 - XDC：`create_clock` + 佔位 PACKAGE_PIN（真實 pinout 待 ProtoBoard 板檔）。
 - **誠實標記**：EDIF 尚未在真 Vivado 上驗證，首次上機前需 `link_design` 檢查。
 
-### 4.6 誠實限制
+### 4.7 誠實限制
 
 **VP1902 bitstream 格式未公開**，任何第三方都無法直接產生可燒錄檔案
 （開源逆向版圖：Project X-Ray = 7-series；Project U-Ray = UltraScale/+
@@ -108,7 +120,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
 做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
-## 5. 驗證結果（v0.3，examples/alu4.v，8×8 邏輯格、8 tracks）
+## 5. 驗證結果（v0.4，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
 
 | 指標 | 值 |
 |---|---|
@@ -119,21 +131,27 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 | placement HPWL | 56 |
 | routing | 無壅塞（max channel 4/8） |
 | logic depth | 2 |
+| critical path / est. Fmax | 0.1299 ns / ~7.7 GHz（邏輯模型估計） |
+| worst slack @10ns | +9.86 ns（--clock 0.05 正確報違例並 exit 1） |
 | EDIF/XDC | 產出 OK，結構含 LUTn INIT 與 FDRE |
 
-v0.2 → v0.3 迴歸：上述數字**完全一致**（arch 檔化為純重構，行為不變）。
+v0.2 → v0.3 迴歸：面積/佈局/佈線數字**完全一致**（arch 檔化為純重構）。
+v0.3 → v0.4：新增 STA 報表，QoR 數字不變。
 
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
-`tests/test_arch.py` 6 項（v0.3 新增）：預設/路徑載入、未知 arch 報錯、
+`tests/test_arch.py` 6 項（v0.3）：預設/路徑載入、未知 arch 報錯、
 segment 排序與覆蓋、利用率公式迴歸、IO 策略生效。
+`tests/test_timing.py` 6 項（v0.4 新增）：wire delay 模型、單 LUT 路徑
+CP 下界、criticality 範圍與最關鍵 net、緊時脈違例偵測、CP ≥ depth×t_lut
+下界、CLI 時序報表。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
 1. 語言子集擴充：concat/切片/case、FSM extraction（對齊 Synplify FSM Compiler）。
 2. LUT mapping 換 cut-enumeration（FlowMap 式）；BRAM/DSP58/CARRY8 推斷。
-3. switch block 建模 + timing-driven P&R + 佈線延遲回填
-   （消費 arch 描述檔的 segment/R-C 表；見《改進計劃》Phase A 第 2–4 項）。
+3. ~~STA~~（v0.4 完成）；下一步：A* router 與解析式初始佈局消費 criticality
+   （見《改進計劃》Phase A 第 3–4 項），switch block 建模與 routing 拓撲回填。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
    對齊《Emulator 容量與架構對標分析》的 1→2→4→8 擴展路線。
@@ -161,3 +179,7 @@ segment 排序與覆蓋、利用率公式迴歸、IO 策略生效。
   `arch/vp1902.json` + `efc/arch.py`；envelope/CLB/segment/switch block/IO
   策略全部改為資料驅動，`--arch` 可切換目標元件；行為零迴歸，
   新增 `tests/test_arch.py` 6 項。
+- v0.4（2026-10-25）：**STA 引擎**（改進計劃 Phase A 第 2 項）——Elmore wire
+  delay（placement HPWL × arch segment R/C）+ arrival/required/slack +
+  per-net criticality；CLI 新增 `--clock`、critical_path/Fmax/slack 報表與
+  違例 exit 1；新增 `tests/test_timing.py` 6 項（共 16 項全過）。

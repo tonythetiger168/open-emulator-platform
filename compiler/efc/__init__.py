@@ -9,7 +9,7 @@ Pipeline (Synplify Pro analogue):
   pack.py     CLB packing (8 LUT6+16 FF) ~ VP1902 slice structure
   place.py    SA placement (block level) ~ self-developed P&R, VPR-style
   route.py    PathFinder routing         ~ self-developed P&R
-  timing.py   logic depth                ~ static timing estimate
+  timing.py   STA (Elmore + criticality) ~ Timing Analyst
   edif.py     EDIF 2.0.0 + XDC writers   ~ Vivado real-device path
 """
-__version__ = "0.3.0"
+__version__ = "0.4.0"

@@ -29,8 +29,11 @@
    switch block/IO 策略全部資料驅動，`--arch` 可切換元件；alu4 迴歸數字不變，
    新增 `tests/test_arch.py` 6 項。
 
-2. **Timing 引擎升級**：logic depth → Elmore RC + STA，產出 per-net criticality。
-   沒有 criticality，placer 與 router 都無法 timing-driven。
+2. **Timing 引擎升級** —— ✅ **已完成（v0.4，2026-10-25）**：Elmore RC +
+   STA，產出 per-net arrival/required/slack/**criticality**（VPR 式 1−slack/T）。
+   落地：`efc/timing.py::sta()`；CLI 報 critical_path/Fmax/worst_slack，
+   `--clock` 違例 exit 1；`tests/test_timing.py` 6 項。下一步第 3–4 項直接
+   消費 criticality。
 
 3. **Router 換 directed search**：純 BFS → A* + lookahead
    （VPR timing-driven PathFinder / nextpnr router2）。
@@ -76,7 +79,7 @@
 ## 3. 執行順序
 
 ```
-1 ✅（v0.3）→ 2 → 3 → 4    （一輪把 P&R 從「能跑」拉到「timing-driven」）
+1 ✅ → 2 ✅（v0.4）→ 3 → 4    （一輪把 P&R 從「能跑」拉到「timing-driven」）
 → 5              （mapping 收口）
 → 10 ‖ 9         （正確性驗證與真機靶機並行）
 → 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
@@ -98,3 +101,4 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
 - v1.0（2026-10-25）：初版。對標 VTR/VPR 9、nextpnr、ABC/Yosys、OpenFPGA、
   RapidWright、OpenXC7/prjuray、VPR-Evolve；排定 Phase A/B/C 共 12 項改進。
 - v1.1（2026-10-25）：Phase A 第 1 項（arch 描述檔化）標記完成（efc v0.3）。
+- v1.2（2026-10-25）：Phase A 第 2 項（STA/criticality）標記完成（efc v0.4）。
