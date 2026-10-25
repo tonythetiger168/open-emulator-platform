@@ -46,7 +46,11 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
             src_term = terms[0]
         sinks = [tpos(t) for t in terms if t != src_term]
         demands[net] = (tpos(src_term), sinks)
-    rr = route(demands, grid, tracks)
+
+    # placement-aware STA (Elmore wire delay from arch spec) — runs pre-route
+    # so the A* router can consume per-net criticality (VPR-style flow).
+    st = sta(mapped, ext_nets, blk_at, fab, clock_ns=clock_ns, arch=spec)
+    rr = route(demands, grid, tracks, crit=st["criticality"], arch=spec)
 
     n_luts = len(mapped.luts)
     n_ffs = len(mapped.dffs)
@@ -65,10 +69,9 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
         "route_wirelength": rr["wirelength"],
         "route_max_channel": f"{rr['max_channel']}/{tracks}",
         "route_overused_channels": rr["overused"],
+        "route_expanded_nodes": rr["expanded_nodes"],
         "logic_depth_LUT": logic_depth(mapped),
     }
-    # placement-aware STA (Elmore wire delay from arch spec)
-    st = sta(mapped, ext_nets, blk_at, fab, clock_ns=clock_ns, arch=spec)
     rep.update({
         "clock_ns": clock_ns,
         "critical_path_ns": st["critical_path_ns"],

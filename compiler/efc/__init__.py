@@ -8,8 +8,8 @@ Pipeline (Synplify Pro analogue):
   fabric.py   logical grid from arch     ~ VPR grid builder
   pack.py     CLB packing (8 LUT6+16 FF) ~ VP1902 slice structure
   place.py    SA placement (block level) ~ self-developed P&R, VPR-style
-  route.py    PathFinder routing         ~ self-developed P&R
+  route.py    A* timing-driven PathFinder ~ self-developed P&R
   timing.py   STA (Elmore + criticality) ~ Timing Analyst
   edif.py     EDIF 2.0.0 + XDC writers   ~ Vivado real-device path
 """
-__version__ = "0.4.0"
+__version__ = "0.5.0"
