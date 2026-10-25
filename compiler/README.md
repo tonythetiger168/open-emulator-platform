@@ -17,7 +17,7 @@
 | 架構描述（JSON，data-driven） | `efc/arch.py` + `arch/vp1902.json` | —（VPR architecture XML 對應） |
 | CLB 打包（8×LUT6+16FF） | `efc/pack.py` | —（VP1902 slice 結構，BLE packing） |
 | Placement（SA，block 級） | `efc/place.py` | —（自研 P&R，VPR 式） |
-| Routing（PathFinder） | `efc/route.py` | 同上 |
+| Routing（A* timing-driven PathFinder） | `efc/route.py` | 同上 |
 | STA（Elmore + slack/criticality） | `efc/timing.py` | Timing Analyst |
 | EDIF/XDC 輸出 | `efc/edif.py` | Synplify 的 EDIF+SDC 出貨格式 |
 
@@ -58,7 +58,7 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 2. 時序為 STA（Elmore wire delay 依 placement HPWL 估算 + t_lut/t_clkq/t_setup
    來自 arch 描述檔），但尚未依真實 routing 拓撲回填延遲。
 3. LUT mapper 為貪婪 cone-merge，非最優（後續換 cut-enumeration）。
-4. Routing 為最簡 4 鄰格圖，未消費 arch 的 switch block / segment 長度。
+4. Routing 已換 A* directed search + lookahead 並消費 STA criticality（v0.5），但仍為最簡 4 鄰格圖，未消費 arch 的 switch block / segment 長度。
 5. `arch/vp1902.json` 的 timing 與 R/C 為邏輯模型估計值，非矽真值
    （VP1902 詳細 timing 未公開）。
 
@@ -67,7 +67,8 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 - [ ] concat/切片/case、FSM extraction（對齊 Synplify FSM Compiler）
 - [ ] cut-enumeration LUT mapping（FlowMap 式）、BRAM/DSP58 推斷、CARRY8
 - [x] STA：Elmore RC + arrival/required/slack/criticality（v0.4）
-- [ ] switch block + timing-driven P&R（消費 arch segment/R-C 表與 criticality）
+- [x] Router BFS → A* + lookahead，消費 criticality（v0.5）
+- [ ] switch block 建模 + routing 拓撲延遲回填（消費 arch segment/R-C 表）
 - [x] Arch 描述檔化（v0.3；`arch/vp1902.json` + `efc/arch.py`）
 - [x] EDIF/XDC 輸出接 Vivado（v0.2；真機驗證待跑）
 - [ ] OpenXC7（UltraScale+）目標後端：不需 Vivado 的端到端真 bitstream 驗證靶機

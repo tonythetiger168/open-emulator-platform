@@ -1,6 +1,6 @@
 # efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
 
-> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v1.0
+> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v1.3
 > 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
 > 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
 > roadmap 的展開與具體化。
@@ -35,10 +35,14 @@
    `--clock` 違例 exit 1；`tests/test_timing.py` 6 項。下一步第 3–4 項直接
    消費 criticality。
 
-3. **Router 換 directed search**：純 BFS → A* + lookahead
-   （VPR timing-driven PathFinder / nextpnr router2）。
-   注意：VTR 8 已將 BFS router 整個移除——BFS 路線已被證明是死路，
-   趁 efc 規模小就換掉。
+3. **Router 換 directed search** —— ✅ **已完成（v0.5，2026-10-25）**：
+   純 BFS → A* + Manhattan lookahead（VPR timing-driven PathFinder /
+   nextpnr router2 路線）。邊成本 `crit×delay + (1−crit)×congestion`，
+   crit 由 `timing.sta()` 的 per-net criticality 直接餵入；關鍵 net 走
+   最短徑不讓路、非關鍵 net 繞開壅塞。落地：`efc/route.py` 改寫 +
+   cli 先 STA 後 route；alu4 QoR 零迴歸（wirelength 57 / max channel 4/8
+   / CP 0.1299 ns 全同），節點展開數 466→182（2.56×）；
+   新增 `tests/test_route.py` 6 項（共 22 項全過）。
 
 4. **Placer 初始解**：smart centroid（VTR 9）或 HeAP 式解析 seeding
    （quadratic wirelength + bound2bound + spreading / legalization），再 SA refine。
@@ -79,7 +83,7 @@
 ## 3. 執行順序
 
 ```
-1 ✅ → 2 ✅（v0.4）→ 3 → 4    （一輪把 P&R 從「能跑」拉到「timing-driven」）
+1 ✅ → 2 ✅（v0.4）→ 3 ✅（v0.5）→ 4    （一輪把 P&R 從「能跑」拉到「timing-driven」）
 → 5              （mapping 收口）
 → 10 ‖ 9         （正確性驗證與真機靶機並行）
 → 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
@@ -102,3 +106,4 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
   RapidWright、OpenXC7/prjuray、VPR-Evolve；排定 Phase A/B/C 共 12 項改進。
 - v1.1（2026-10-25）：Phase A 第 1 項（arch 描述檔化）標記完成（efc v0.3）。
 - v1.2（2026-10-25）：Phase A 第 2 項（STA/criticality）標記完成（efc v0.4）。
+- v1.3（2026-10-25）：Phase A 第 3 項（A* timing-driven router）標記完成（efc v0.5）。
