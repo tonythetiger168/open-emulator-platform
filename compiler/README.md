@@ -16,7 +16,7 @@
 | 技術映射 gates→LUT6 + INIT | `efc/techmap.py` | Technology Mapper（Technology view） |
 | 架構描述（JSON，data-driven） | `efc/arch.py` + `arch/vp1902.json` | —（VPR architecture XML 對應） |
 | CLB 打包（8×LUT6+16FF） | `efc/pack.py` | —（VP1902 slice 結構，BLE packing） |
-| Placement（SA，block 級） | `efc/place.py` | —（自研 P&R，VPR 式） |
+| Placement（smart-centroid seed + SA） | `efc/place.py` | —（自研 P&R，VPR 式） |
 | Routing（A* timing-driven PathFinder） | `efc/route.py` | 同上 |
 | STA（Elmore + slack/criticality） | `efc/timing.py` | Timing Analyst |
 | EDIF/XDC 輸出 | `efc/edif.py` | Synplify 的 EDIF+SDC 出貨格式 |
@@ -61,6 +61,8 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 4. Routing 已換 A* directed search + lookahead 並消費 STA criticality（v0.5），但仍為最簡 4 鄰格圖，未消費 arch 的 switch block / segment 長度。
 5. `arch/vp1902.json` 的 timing 與 R/C 為邏輯模型估計值，非矽真值
    （VP1902 詳細 timing 未公開）。
+6. Placement 的 centroid seeding 之 legalization 是 greedy nearest-free-slot
+   （O(nb×slots)）；設計規模變大後換 Hungarian/auction 求解器。
 
 ## Roadmap
 
@@ -68,6 +70,7 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 - [ ] cut-enumeration LUT mapping（FlowMap 式）、BRAM/DSP58 推斷、CARRY8
 - [x] STA：Elmore RC + arrival/required/slack/criticality（v0.4）
 - [x] Router BFS → A* + lookahead，消費 criticality（v0.5）
+- [x] Placement smart-centroid 初始解 + SA refine（v0.6）
 - [ ] switch block 建模 + routing 拓撲延遲回填（消費 arch segment/R-C 表）
 - [x] Arch 描述檔化（v0.3；`arch/vp1902.json` + `efc/arch.py`）
 - [x] EDIF/XDC 輸出接 Vivado（v0.2；真機驗證待跑）
