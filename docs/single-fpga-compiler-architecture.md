@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v0.4（Elmore STA + criticality）
+> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v0.5（A* timing-driven router）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -24,7 +24,7 @@
    carry chain、記憶體與 DSP 推斷）。
 5. **輸出**：EDIF netlist + 約束，交給廠商 P&R（Vivado）——Synplify 到這層為止。
 
-## 3. efc pipeline 對照（v0.4）
+## 3. efc pipeline 對照（v0.5）
 
 ```
 verilog.py   語言前端（lexer/parser/AST）            ~ HDL Compiler
@@ -36,7 +36,7 @@ arch.py      架構描述檔 loader（JSON）               ~ VPR architecture X
                CLB 結構 / segment 長度+RC / switch block / IO 策略
 pack.py      CLB 打包（8×LUT6+16FF，LUT→DFF 配對）   ~ VP1902 slice 結構
 place.py     SA placement（block 級，HPWL）          ← 自研 P&R（VPR 式）
-route.py     PathFinder negotiated-congestion        ← 自研 P&R
+route.py     A* timing-driven PathFinder             ← 自研 P&R
 timing.py    STA：Elmore RC + slack/criticality      ~ Timing Analyst
 edif.py      EDIF 2.0.0 + XDC 輸出                   ~ Synplify 出貨格式 → Vivado
 ```
@@ -98,10 +98,15 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 ### 4.5 P&R
 
 - Placement：VPR 式模擬退火，成本 = 全網表 HPWL；動作為 block 交換/移位。
-- Routing：PathFinder negotiated congestion，rip-up & re-route 全網表迭代，
-  history penalty 收斂；邏輯格陣 N×N、通道容量 = tracks。
-- 後續：timing-driven 成本項、switch block 消費、wire segment 長度
-  （arch 描述檔已備好資料，見改進計劃 Phase A 第 2–4 項）。
+- Routing（v0.5）：**A\* directed search + lookahead** 的 timing-driven
+  PathFinder。邊成本 = `crit×delay + (1−crit)×congestion`（VPR 式），
+  crit 來自 STA 的 per-net criticality——關鍵 net 走最短徑不讓路，
+  非關鍵 net 繞開壅塞；lookahead = Manhattan×最小單跳成本（admissible，不高估真實成本），
+  搜尋有方向、不再 BFS 攤平（VTR 8 已證明 BFS router 是死路並整個移除）。
+  保留 negotiated congestion：rip-up & re-route 全網表迭代 + history penalty。
+  alu4 實測：wirelength/通道佔用與 BFS 版完全一致，節點展開數降 2.56×。
+- 後續：switch block 消費、wire segment 長度、routing 拓撲延遲回填
+  （arch 描述檔已備好資料，見改進計劃 Phase A 第 4–5 項與 Phase B）。
 
 ### 4.6 Vivado 真機路徑（edif.py）
 
@@ -120,7 +125,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
 做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
-## 5. 驗證結果（v0.4，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
+## 5. 驗證結果（v0.5，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
 
 | 指標 | 值 |
 |---|---|
@@ -129,7 +134,8 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 | CLB used | 4 |
 | VP1902 LUT6 利用率 | 0.000142% |
 | placement HPWL | 56 |
-| routing | 無壅塞（max channel 4/8） |
+| routing | 無壅塞（max channel 4/8，wirelength 57） |
+| router 節點展開數 | 292（BFS 版同條件 466，A* 降 2.56×，QoR 不變） |
 | logic depth | 2 |
 | critical path / est. Fmax | 0.1299 ns / ~7.7 GHz（邏輯模型估計） |
 | worst slack @10ns | +9.86 ns（--clock 0.05 正確報違例並 exit 1） |
@@ -137,21 +143,26 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 
 v0.2 → v0.3 迴歸：面積/佈局/佈線數字**完全一致**（arch 檔化為純重構）。
 v0.3 → v0.4：新增 STA 報表，QoR 數字不變。
+v0.4 → v0.5：router 換 A*，wirelength / max channel / 時序數字**完全一致**。
 
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
 `tests/test_arch.py` 6 項（v0.3）：預設/路徑載入、未知 arch 報錯、
 segment 排序與覆蓋、利用率公式迴歸、IO 策略生效。
-`tests/test_timing.py` 6 項（v0.4 新增）：wire delay 模型、單 LUT 路徑
+`tests/test_timing.py` 6 項（v0.4）：wire delay 模型、單 LUT 路徑
 CP 下界、criticality 範圍與最關鍵 net、緊時脈違例偵測、CP ≥ depth×t_lut
 下界、CLI 時序報表。
+`tests/test_route.py` 6 項（v0.5 新增）：空格陣最短徑與有向展開上界、
+multi-source tree 接附、關鍵 net 無視壅塞走最短徑、非關鍵 net 繞開
+懲罰邊、PathFinder 收斂且 crit 可缺省、CLI 報表含 expanded_nodes。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
 1. 語言子集擴充：concat/切片/case、FSM extraction（對齊 Synplify FSM Compiler）。
 2. LUT mapping 換 cut-enumeration（FlowMap 式）；BRAM/DSP58/CARRY8 推斷。
-3. ~~STA~~（v0.4 完成）；下一步：A* router 與解析式初始佈局消費 criticality
-   （見《改進計劃》Phase A 第 3–4 項），switch block 建模與 routing 拓撲回填。
+3. ~~STA~~（v0.4）、~~A* router~~（v0.5）完成；下一步：解析式/smart-centroid
+   初始佈局消費 criticality（《改進計劃》Phase A 第 4 項），switch block
+   建模與 routing 拓撲回填。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
    對齊《Emulator 容量與架構對標分析》的 1→2→4→8 擴展路線。
@@ -183,3 +194,8 @@ CP 下界、criticality 範圍與最關鍵 net、緊時脈違例偵測、CP ≥ 
   delay（placement HPWL × arch segment R/C）+ arrival/required/slack +
   per-net criticality；CLI 新增 `--clock`、critical_path/Fmax/slack 報表與
   違例 exit 1；新增 `tests/test_timing.py` 6 項（共 16 項全過）。
+- v0.5（2026-10-25）：**A\* timing-driven router**（改進計劃 Phase A 第 3 項）——
+  BFS 換 A\* directed search + Manhattan lookahead；邊成本
+  `crit×delay + (1−crit)×congestion` 消費 STA criticality；報表新增
+  route_expanded_nodes；alu4 展開數降 2.56× 且 QoR 零迴歸；新增
+  `tests/test_route.py` 6 項（共 22 項全過）。
