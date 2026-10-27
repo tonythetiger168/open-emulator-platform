@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v0.5（A* timing-driven router）
+> open-emulator-platform 專案 ｜ 2026-10-27 ｜ v0.6（smart-centroid 初始佈局）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -97,7 +97,11 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 
 ### 4.5 P&R
 
-- Placement：VPR 式模擬退火，成本 = 全網表 HPWL；動作為 block 交換/移位。
+- Placement（v0.6）：**smart-centroid 初始解 + SA refine**（VTR 9 路線）。
+  先做星型連接加權質心迭代（IO 為固定錨點，全程無 RNG、結果決定性），
+  再以貪婪最近空槽合法化，最後進 VPR 式 SA（HPWL）refine——VTR 9 證明
+  「高品質初始解 + 有方向的 move」是 runtime 與 QoR 雙贏。`init="random"`
+  保留 v0.5 的隨機種子入口供 A/B 量測。
 - Routing（v0.5）：**A\* directed search + lookahead** 的 timing-driven
   PathFinder。邊成本 = `crit×delay + (1−crit)×congestion`（VPR 式），
   crit 來自 STA 的 per-net criticality——關鍵 net 走最短徑不讓路，
@@ -144,6 +148,8 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 v0.2 → v0.3 迴歸：面積/佈局/佈線數字**完全一致**（arch 檔化為純重構）。
 v0.3 → v0.4：新增 STA 報表，QoR 數字不變。
 v0.4 → v0.5：router 換 A*，wirelength / max channel / 時序數字**完全一致**。
+v0.5 → v0.6：placer 換 smart-centroid 種子，alu4 QoR 數字**完全一致**；
+chain 測試中種子 HPWL ≤ 隨機種子中位數，且 SA refine 不劣化種子。
 
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
@@ -152,16 +158,20 @@ segment 排序與覆蓋、利用率公式迴歸、IO 策略生效。
 `tests/test_timing.py` 6 項（v0.4）：wire delay 模型、單 LUT 路徑
 CP 下界、criticality 範圍與最關鍵 net、緊時脈違例偵測、CP ≥ depth×t_lut
 下界、CLI 時序報表。
-`tests/test_route.py` 6 項（v0.5 新增）：空格陣最短徑與有向展開上界、
+`tests/test_route.py` 6 項（v0.5）：空格陣最短徑與有向展開上界、
 multi-source tree 接附、關鍵 net 無視壅塞走最短徑、非關鍵 net 繞開
 懲罰邊、PathFinder 收斂且 crit 可缺省、CLI 報表含 expanded_nodes。
+`tests/test_place.py` 6 項（v0.6 新增）：種子合法且決定性、種子 HPWL ≤
+隨機種子中位數、線性鏈種子緊湊、SA refine 不劣化種子、alu4 迴歸窗、
+init="random" 相容 v0.5（共 28 項全過）。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
 1. 語言子集擴充：concat/切片/case、FSM extraction（對齊 Synplify FSM Compiler）。
 2. LUT mapping 換 cut-enumeration（FlowMap 式）；BRAM/DSP58/CARRY8 推斷。
-3. ~~STA~~（v0.4）、~~A* router~~（v0.5）完成；下一步：解析式/smart-centroid
-   初始佈局消費 criticality（《改進計劃》Phase A 第 4 項），switch block
+3. ~~STA~~（v0.4）、~~A* router~~（v0.5）、~~smart-centroid 初始佈局~~（v0.6）
+   完成；下一步：cut-enumeration LUT mapping（《改進計劃》Phase A 第 5 項），
+   以及 placement 成本項消費 criticality（bound2bound 式加權）、switch block
    建模與 routing 拓撲回填。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
@@ -199,3 +209,7 @@ multi-source tree 接附、關鍵 net 無視壅塞走最短徑、非關鍵 net �
   `crit×delay + (1−crit)×congestion` 消費 STA criticality；報表新增
   route_expanded_nodes；alu4 展開數降 2.56× 且 QoR 零迴歸；新增
   `tests/test_route.py` 6 項（共 22 項全過）。
+- v0.6（2026-10-27）：**smart-centroid 初始佈局**（改進計劃 Phase A 第 4 項）——
+  星型加權質心迭代種子（無 RNG、決定性）+ 貪婪合法化 + SA refine；
+  `place(init="random")` 保留 v0.5 行為供 A/B；alu4 QoR 零迴歸；
+  新增 `tests/test_place.py` 6 項（共 28 項全過）。

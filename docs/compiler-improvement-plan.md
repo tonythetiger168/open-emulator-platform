@@ -1,6 +1,6 @@
 # efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
 
-> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v1.3
+> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v1.4
 > 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
 > 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
 > roadmap 的展開與具體化。
@@ -44,9 +44,14 @@
    / CP 0.1299 ns 全同），節點展開數 466→182（2.56×）；
    新增 `tests/test_route.py` 6 項（共 22 項全過）。
 
-4. **Placer 初始解**：smart centroid（VTR 9）或 HeAP 式解析 seeding
-   （quadratic wirelength + bound2bound + spreading / legalization），再 SA refine。
-   VTR 9 證明「高品質初始解 + 有方向的 move」是 runtime 與 QoR 雙贏。
+4. **Placer 初始解** —— ✅ **已完成（v0.6，2026-10-27）**：採 smart centroid
+   （VTR 9）路線——星型連接加權質心迭代出種子（IO 固定錨點、無 RNG、
+   決定性）→ 貪婪最近空槽合法化 → 原 VPR 式 SA refine。落地：
+   `efc/place.py::initial_placement()` + `place(init="centroid")` 預設啟用、
+   `init="random"` 保留 v0.5 行為供 A/B；alu4 QoR 零迴歸（HPWL 56 /
+   wirelength 57 / CP 0.1299 ns 全同）；新增 `tests/test_place.py` 6 項
+   （共 28 項全過）。後續微調：placement 成本項消費 criticality
+   （bound2bound 式加權）留作下一步增強。
 
 5. **LUT mapping 換 cut-enumeration**（ABC / FlowMap 式 priority cuts），
    替換貪婪 cone-merge；與 1–4 做完後 QoR 收口。
@@ -83,7 +88,7 @@
 ## 3. 執行順序
 
 ```
-1 ✅ → 2 ✅（v0.4）→ 3 ✅（v0.5）→ 4    （一輪把 P&R 從「能跑」拉到「timing-driven」）
+1 ✅ → 2 ✅（v0.4）→ 3 ✅（v0.5）→ 4 ✅（v0.6）    （P&R 從「能跑」到「timing-driven」）
 → 5              （mapping 收口）
 → 10 ‖ 9         （正確性驗證與真機靶機並行）
 → 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
@@ -107,3 +112,5 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
 - v1.1（2026-10-25）：Phase A 第 1 項（arch 描述檔化）標記完成（efc v0.3）。
 - v1.2（2026-10-25）：Phase A 第 2 項（STA/criticality）標記完成（efc v0.4）。
 - v1.3（2026-10-25）：Phase A 第 3 項（A* timing-driven router）標記完成（efc v0.5）。
+- v1.4（2026-10-27）：Phase A 第 4 項（smart-centroid 初始佈局）標記完成（efc v0.6）。
+  備註：v0.6 程式碼由每小時自動接續 session 完成，本版同步補齊設計書/計劃文件。
