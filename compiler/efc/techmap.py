@@ -1,12 +1,22 @@
 """Technology mapping: generic gates -> LUT6 (VP1902 CLB slice native).
 
-Greedy cone-merge (a gate merges into its single fanout LUT when the combined
-input count fits K), plus cone bookkeeping so every surviving LUT can produce
-its INIT truth table for EDIF/unisim output.
+Default (v0.7): cut-enumeration mapping in cutmap.py (ABC/FlowMap style).
+method="greedy" keeps the original cone-merge for A/B measurement: a gate
+merges into its single fanout LUT when the combined input count fits K.
+Both produce the same LutNet shape with cone bookkeeping so every surviving
+LUT can produce its INIT truth table for EDIF/unisim output.
 """
 from .netlist import Netlist, Cell, CONST0, CONST1
 
 MERGEABLE = {"AND2", "OR2", "XOR2", "NOT", "MUX2"}
+
+
+def techmap(nl: Netlist, k: int = 6, method: str = "cut"):
+    """Map generic gates to K-LUTs. method: "cut" (default) or "greedy"."""
+    if method == "greedy":
+        return _techmap_greedy(nl, k)
+    from .cutmap import cutmap
+    return cutmap(nl, k)
 
 class LutNet:
     def __init__(self):
@@ -17,7 +27,8 @@ class LutNet:
         self.net_names = {}
         self.cones = {}       # id(lut cell) -> {net: driver gate Cell} inside cone
 
-def techmap(nl: Netlist, k: int = 6):
+def _techmap_greedy(nl: Netlist, k: int = 6):
+    """Original greedy cone-merge (kept for A/B via method="greedy")."""
     fanout = {}
     for c in nl.cells:
         for n in c.ins:

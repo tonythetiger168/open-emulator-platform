@@ -3,7 +3,8 @@
 Pipeline (Synplify Pro analogue):
   verilog.py  frontend parse             ~ Synplify HDL compiler
   netlist.py  elaborate, bit-blast       ~ HDL Analyst (RTL view)
-  techmap.py  gates -> LUT6 + INIT       ~ technology mapper (Technology view)
+  techmap.py  gates -> LUT6 (dispatcher) ~ technology mapper (Technology view)
+  cutmap.py   cut-enumeration LUT mapper ~ ABC/FlowMap-style mapping
   arch.py     device arch spec (JSON)    ~ VPR architecture XML
   fabric.py   logical grid from arch     ~ VPR grid builder
   pack.py     CLB packing (8 LUT6+16 FF) ~ VP1902 slice structure
@@ -12,4 +13,4 @@ Pipeline (Synplify Pro analogue):
   timing.py   STA (Elmore + criticality) ~ Timing Analyst
   edif.py     EDIF 2.0.0 + XDC writers   ~ Vivado real-device path
 """
-__version__ = "0.6.0"
+__version__ = "0.7.0"

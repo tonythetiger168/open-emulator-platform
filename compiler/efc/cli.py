@@ -16,12 +16,12 @@ from .timing import logic_depth, sta
 from .edif import write_edif, write_xdc
 
 def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
-                 arch=DEFAULT_ARCH, clock_ns=10.0):
+                 arch=DEFAULT_ARCH, clock_ns=10.0, mapper="cut"):
     spec = load_arch(arch) if not hasattr(arch, "envelope") else arch
     src = open(path, encoding="utf-8").read()
     mod = parse_verilog(src)
     nl = elaborate(mod)
-    mapped, _merged = techmap(nl, k=spec.clb.lut_k)   # native LUT-K from arch
+    mapped, _sel = techmap(nl, k=spec.clb.lut_k, method=mapper)  # LUT-K from arch
     blocks, ext_nets = pack(mapped)
     fab = build_fabric(grid, tracks, nl.inputs, nl.outputs, arch=spec)
     blk_at, hpwl = place(blocks, ext_nets, fab, seed=seed)
@@ -58,6 +58,7 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
     rep = {
         "module": mod.name,
         "arch": spec.name,
+        "mapper": mapper,
         "target": spec.part,
         **stats(nl, mapped, spec.clb.lut_k),
         "CLB_used": len(blocks),
@@ -97,13 +98,15 @@ def main(argv=None):
                     help="clock period in ns for STA and XDC create_clock")
     ap.add_argument("--arch", default=DEFAULT_ARCH,
                     help="arch name in compiler/arch/ or path to a JSON spec")
+    ap.add_argument("--mapper", default="cut", choices=["cut", "greedy"],
+                    help="LUT mapper: cut-enumeration (default) or legacy greedy cone-merge")
     ap.add_argument("--edif", help="write EDIF 2.0.0 netlist for Vivado")
     ap.add_argument("--xdc", help="write XDC constraints skeleton")
     ap.add_argument("--json")
     args = ap.parse_args(argv)
     rep = compile_file(args.verilog, args.grid, args.tracks, args.seed,
                        edif=args.edif, xdc=args.xdc, arch=args.arch,
-                       clock_ns=args.clock)
+                       clock_ns=args.clock, mapper=args.mapper)
     for k, v in rep.items():
         print(f"{k:24s}: {v}")
     if args.json:
