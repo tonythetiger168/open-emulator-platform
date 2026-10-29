@@ -16,12 +16,16 @@ from .timing import logic_depth, sta
 from .edif import write_edif, write_xdc
 
 def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
-                 arch=DEFAULT_ARCH, clock_ns=10.0, mapper="cut"):
+                 arch=DEFAULT_ARCH, clock_ns=10.0, mapper="cut", lec=False):
     spec = load_arch(arch) if not hasattr(arch, "envelope") else arch
     src = open(path, encoding="utf-8").read()
     mod = parse_verilog(src)
     nl = elaborate(mod)
     mapped, _sel = techmap(nl, k=spec.clb.lut_k, method=mapper)  # LUT-K from arch
+    lec_res = None
+    if lec:
+        from .lec import run_lec
+        lec_res = run_lec(nl, mapped)
     blocks, ext_nets = pack(mapped)
     fab = build_fabric(grid, tracks, nl.inputs, nl.outputs, arch=spec)
     blk_at, hpwl = place(blocks, ext_nets, fab, seed=seed)
@@ -73,6 +77,11 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
         "route_expanded_nodes": rr["expanded_nodes"],
         "logic_depth_LUT": logic_depth(mapped),
     }
+    if lec_res is not None:
+        rep["lec"] = (lec_res["status"] if lec_res["status"] != "proven"
+                      else f"proven ({lec_res['proven']}/{lec_res['total']} equiv cells)")
+        if lec_res["status"] == "skipped":
+            rep["lec"] = "skipped (yosys not found)"
     rep.update({
         "clock_ns": clock_ns,
         "critical_path_ns": st["critical_path_ns"],
@@ -100,18 +109,25 @@ def main(argv=None):
                     help="arch name in compiler/arch/ or path to a JSON spec")
     ap.add_argument("--mapper", default="cut", choices=["cut", "greedy"],
                     help="LUT mapper: cut-enumeration (default) or legacy greedy cone-merge")
+    ap.add_argument("--lec", action="store_true",
+                    help="prove netlist vs mapped LUTs with Yosys equiv (needs yosys)")
     ap.add_argument("--edif", help="write EDIF 2.0.0 netlist for Vivado")
     ap.add_argument("--xdc", help="write XDC constraints skeleton")
     ap.add_argument("--json")
     args = ap.parse_args(argv)
     rep = compile_file(args.verilog, args.grid, args.tracks, args.seed,
                        edif=args.edif, xdc=args.xdc, arch=args.arch,
-                       clock_ns=args.clock, mapper=args.mapper)
+                       clock_ns=args.clock, mapper=args.mapper, lec=args.lec)
     for k, v in rep.items():
         print(f"{k:24s}: {v}")
     if args.json:
         json.dump(rep, open(args.json, "w"), indent=2, ensure_ascii=False)
     ok = rep["route_overused_channels"] == 0 and not rep["timing_violated"]
+    if args.lec:
+        # "failed"/"error" block the build; "skipped" (no yosys) is reported
+        # in the lec line but must not fake-fail a clean compile.
+        lec_status = str(rep.get("lec", ""))
+        ok = ok and not (lec_status.startswith("failed") or lec_status.startswith("error"))
     return 0 if ok else 1
 
 if __name__ == "__main__":
