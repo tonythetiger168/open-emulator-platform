@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-27 ｜ v0.7（cut-enumeration mapping）
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v0.8（LEC 驗證迴圈）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -24,7 +24,7 @@
    carry chain、記憶體與 DSP 推斷）。
 5. **輸出**：EDIF netlist + 約束，交給廠商 P&R（Vivado）——Synplify 到這層為止。
 
-## 3. efc pipeline 對照（v0.7）
+## 3. efc pipeline 對照（v0.8）
 
 ```
 verilog.py   語言前端（lexer/parser/AST）            ~ HDL Compiler
@@ -33,6 +33,8 @@ netlist.py   展開 + bit-blast → generic gates        ~ HDL Analyst (RTL view
 techmap.py   mapper dispatcher + INIT 真值表計算    ~ Technology Mapper (Tech view)
 cutmap.py    gates → LUT6：cut-enumeration          ~ ABC/FlowMap 式 mapping
                （K-feasible cuts + depth label + area flow；--mapper greedy 可 A/B）
+lec.py       netlist vs LUT 網表 SAT 等價驗證        ~ Formality/LEC
+               （Yosys equiv_make/simple/induct；--lec；無 yosys 報 skipped）
 arch.py      架構描述檔 loader（JSON）               ~ VPR architecture XML
                CLB 結構 / segment 長度+RC / switch block / IO 策略
 pack.py      CLB 打包（8×LUT6+16FF，LUT→DFF 配對）   ~ VP1902 slice 結構
@@ -121,7 +123,26 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 - XDC：`create_clock` + 佔位 PACKAGE_PIN（真實 pinout 待 ProtoBoard 板檔）。
 - **誠實標記**：EDIF 尚未在真 Vivado 上驗證，首次上機前需 `link_design` 檢查。
 
-### 4.7 誠實限制
+### 4.7 LEC 驗證迴圈（v0.8，lec.py）
+
+- 動機（改進計劃 Phase C 第 10 項）：對自研 compiler，每級 pass 後的
+  等價驗證比任何單項 QoR 改進都重要（OpenFPGA/VTR 皆以 formal
+  verification 收口 mapping）。
+- 做法：golden（generic gates）與 gate（mapped LUT+DFF）各發成 flat
+  Verilog——LUT 寫成 `assign o = INIT[{in...}];` 真值表、DFF 兩側同名
+  同結構；Yosys 一條腳本收口：`equiv_make`（按名配對 state bits）→
+  `equiv_simple`（組合 $equiv cells）→ `equiv_induct`（k-step SAT
+  歸納證 DFF 狀態位對）→ `equiv_status -assert`。
+- 四態語義：`proven` / `failed`（真不等價，exit 1）/ `error`（工具
+  崩潰或逾時）/ `skipped`（無 yosys——**誠實回報，絕不偽造通過**）。
+  CLI `--lec` 開關，failed/error 時 exit 1，skipped 不影響乾淨編譯的
+  結束碼。
+- 實測：alu4 cut mapping proven 12/12 $equiv cells；greedy 同過；
+  負面測試翻轉 INIT bit0 正確判 failed。
+- 覆蓋範圍：netlist→LUT mapping 一級（DFF 1:1 存活故時序元素可按名
+  配對）；pack/place/route 不改功能，日後可對 EDIF 輸出再跑一級 LEC。
+
+### 4.8 誠實限制
 
 **VP1902 bitstream 格式未公開**，任何第三方都無法直接產生可燒錄檔案
 （開源逆向版圖：Project X-Ray = 7-series；Project U-Ray = UltraScale/+
@@ -130,7 +151,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
 做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
-## 5. 驗證結果（v0.7，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
+## 5. 驗證結果（v0.8，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
 
 | 指標 | 值 |
 |---|---|
@@ -145,6 +166,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 | critical path / est. Fmax | 0.1198 ns / ~8.3 GHz（邏輯模型估計） |
 | worst slack @10ns | +9.88 ns（--clock 0.05 正確報違例並 exit 1） |
 | EDIF/XDC | 產出 OK，結構含 LUTn INIT 與 FDRE |
+| LEC（--lec） | proven（12/12 $equiv cells；cut 與 greedy mapper 皆過） |
 
 v0.2 → v0.3 迴歸：面積/佈局/佈線數字**完全一致**（arch 檔化為純重構）。
 v0.3 → v0.4：新增 STA 報表，QoR 數字不變。
@@ -155,6 +177,9 @@ v0.6 → v0.7：mapper 換 cut-enumeration——**LUT6 12→4（−67%）、logi
 2→1、CP 0.1299→0.1198 ns**；reconvergent fanout 測試 3→2 LUT（greedy
 無法合併多扇出共享邏輯，cut 以複製換面積）；dead logic 自動移除；
 `--mapper greedy` 可一鍵 A/B。
+v0.7 → v0.8：新增 LEC 迴圈（不改 QoR 數字）——alu4 `--lec` proven
+12/12 $equiv cells，greedy/cut 兩 mapper 皆與 golden netlist 等價；
+INIT 翻轉的負面測試正確判 failed，無 yosys 環境誠實報 skipped。
 
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
@@ -171,7 +196,11 @@ multi-source tree 接附、關鍵 net 無視壅塞走最短徑、非關鍵 net �
 init="random" 相容 v0.5。
 `tests/test_cutmap.py` 6 項（v0.7 新增）：reconvergent fanout 勝 greedy、
 XOR3 單 LUT（INIT=0x96）、K=4 深度受限切兩顆、dead logic 移除、
-alu4 cut ≤ greedy、CLI 預設 mapper=cut（共 34 項全過）。
+alu4 cut ≤ greedy、CLI 預設 mapper=cut。
+`tests/test_lec.py` 8 項（v0.8 新增）：名稱消毒與 INIT 表格式、
+alu4 cut/greedy proven、reconvergent 設計兩 mapper proven、INIT 翻轉
+必判 failed、無 yosys 報 skipped 不偽造通過、CLI --lec 報表
+（共 42 項全過）。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
@@ -179,9 +208,9 @@ alu4 cut ≤ greedy、CLI 預設 mapper=cut（共 34 項全過）。
 2. ~~LUT mapping 換 cut-enumeration~~（v0.7 完成）；BRAM/DSP58/CARRY8 推斷。
 3. ~~STA~~（v0.4）、~~A* router~~（v0.5）、~~smart-centroid 初始佈局~~（v0.6）、
    ~~cut-enumeration mapping~~（v0.7）——《改進計劃》Phase A 全數完成；
-   下一步：LEC 驗證迴圈 ‖ OpenXC7 靶機（Phase C 第 10 ‖ 9 項），以及
-   placement 成本項消費 criticality（bound2bound 式加權）、switch block
-   建模與 routing 拓撲回填。
+   ~~LEC 驗證迴圈~~（v0.8，Phase C 第 10 項）；下一步：OpenXC7 靶機
+   （Phase C 第 9 項），以及 placement 成本項消費 criticality
+   （bound2bound 式加權）、switch block 建模與 routing 拓撲回填。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
    對齊《Emulator 容量與架構對標分析》的 1→2→4→8 擴展路線。
@@ -227,3 +256,9 @@ alu4 cut ≤ greedy、CLI 預設 mapper=cut（共 34 項全過）。
   新增 `efc/cutmap.py`，`techmap.py` 改為 dispatcher（`--mapper greedy` A/B）；
   alu4 LUT6 12→4、depth 2→1、CP 0.1299→0.1198 ns；新增
   `tests/test_cutmap.py` 6 項（共 34 項全過）。
+- v0.8（2026-10-30）：**LEC 驗證迴圈**（改進計劃 Phase C 第 10 項）——
+  新增 `efc/lec.py`：golden/mapped 雙側 flat Verilog 發射 + Yosys
+  equiv_make/simple/induct SAT 證明；`--lec` CLI 開關，proven/failed/
+  error/skipped 四態（無 yosys 誠實報 skipped）；alu4 proven 12/12
+  $equiv cells，INIT 翻轉負面測試正確判 failed；新增
+  `tests/test_lec.py` 8 項（共 42 項全過）。

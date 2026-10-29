@@ -2,7 +2,7 @@
 
 參考 Synplify Pro 架構的單顆 FPGA 編譯器，含**自研 P&R**
 （smart-centroid + SA placement、A* timing-driven PathFinder routing、
-cut-enumeration LUT mapping），並可輸出
+cut-enumeration LUT mapping、SAT-based LEC 等價驗證），並可輸出
 **EDIF 2.0.0 網表 + XDC 約束**接 Vivado 跑真機（xcvp1902）。
 目標元件由 **data-driven 架構描述檔**（`arch/vp1902.json`）定義，
 換元件不必改演算法。設計書見 `docs/single-fpga-compiler-architecture.md`；
@@ -15,6 +15,7 @@ cut-enumeration LUT mapping），並可輸出
 | HDL 前端（parse） | `efc/verilog.py` | HDL Compiler（語言前端） |
 | 展開 / bit-blast | `efc/netlist.py` | HDL Analyst（RTL view，generic netlist） |
 | 技術映射 gates→LUT6 + INIT | `efc/techmap.py` + `efc/cutmap.py` | Technology Mapper（Technology view） |
+| LEC 等價驗證（generic vs mapped netlist） | `efc/lec.py` | Formality/LEC（Yosys equiv_make/simple/induct） |
 | 架構描述（JSON，data-driven） | `efc/arch.py` + `arch/vp1902.json` | —（VPR architecture XML 對應） |
 | CLB 打包（8×LUT6+16FF） | `efc/pack.py` | —（VP1902 slice 結構，BLE packing） |
 | Placement（smart-centroid seed + SA） | `efc/place.py` | —（自研 P&R，VPR 式） |
@@ -44,6 +45,8 @@ python3 -m unittest discover tests -v
 `--arch` 接受 `arch/` 下的名稱或任一 JSON 描述檔路徑；`--clock` 設定
 STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 `--mapper {cut,greedy}` 切換 LUT mapper（預設 cut-enumeration，greedy 供 A/B）。
+`--lec` 對 mapping 結果跑 SAT 等價驗證（需 yosys；proven/failed/skipped
+三態，無 yosys 時誠實報 skipped 不偽造通過，failed/error 時 CLI exit 1）。
 
 ## Verilog 子集（MVP）
 
@@ -60,7 +63,9 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 2. 時序為 STA（Elmore wire delay 依 placement HPWL 估算 + t_lut/t_clkq/t_setup
    來自 arch 描述檔），但尚未依真實 routing 拓撲回填延遲。
 3. LUT mapper 已換 cut-enumeration（v0.7，ABC/FlowMap 式，`--mapper greedy`
-   可 A/B 對照舊版）；未來可加 priority cuts 截斷與 timing-driven mapping。
+   可 A/B 對照舊版）；v0.8 起 `--lec` 對 netlist→LUT mapping 做 SAT 等價
+   驗證（Yosys equiv，覆蓋 techmap 一級）；未來可加 priority cuts 截斷、
+   timing-driven mapping，並把 LEC 擴展到 pack/EDIF 之後。
 4. Routing 已換 A* directed search + lookahead 並消費 STA criticality（v0.5），但仍為最簡 4 鄰格圖，未消費 arch 的 switch block / segment 長度。
 5. `arch/vp1902.json` 的 timing 與 R/C 為邏輯模型估計值，非矽真值
    （VP1902 詳細 timing 未公開）。
@@ -71,6 +76,7 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 
 - [ ] concat/切片/case、FSM extraction（對齊 Synplify FSM Compiler）
 - [x] cut-enumeration LUT mapping（v0.7，FlowMap 式 depth label + area flow）
+- [x] LEC 驗證迴圈（v0.8，Yosys equiv_make/simple/induct，`--lec`）
 - [ ] BRAM/DSP58 推斷、CARRY8
 - [x] STA：Elmore RC + arrival/required/slack/criticality（v0.4）
 - [x] Router BFS → A* + lookahead，消費 criticality（v0.5）

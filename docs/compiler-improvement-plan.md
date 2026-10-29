@@ -1,6 +1,6 @@
 # efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
 
-> open-emulator-platform 專案 ｜ 2026-10-25 ｜ v1.5
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.6
 > 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
 > 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
 > roadmap 的展開與具體化。
@@ -79,9 +79,16 @@
    efc 輸出 nextpnr-xilinx 可接受的 netlist；靶機選 Kintex-7（xc7k325t，
    OpenXC7 demo 最成熟），打通「efc → 真 bitstream → 上板」的無 Vivado 迴路。
 
-10. **LEC 驗證迴圈**（學 OpenFPGA / VTR flow）：每級 pass 後做 SAT-based
-    equivalence check（可呼叫 abc `cec`）。對自研 compiler，這比任何單項
-    QoR 改進都重要。
+10. **LEC 驗證迴圈**（學 OpenFPGA / VTR flow）—— ✅ **已完成（v0.8，2026-10-30）**：
+    每級 pass 後做 SAT-based equivalence check。落地：新增 `efc/lec.py`——
+    golden（generic gates）與 mapped（LUT+DFF）各發 flat Verilog（LUT =
+    INIT 真值表索引、DFF 兩側同名同結構），Yosys `equiv_make` /
+    `equiv_simple` / `equiv_induct` 一條腳本收口（induct 的 k-step SAT
+    歸納負責 DFF 狀態位對）；CLI `--lec` 開關，proven/failed/error/skipped
+    四態——**無 yosys 報 skipped 絕不偽造通過**，failed/error 時 exit 1。
+    實測：alu4 proven 12/12 $equiv cells，cut 與 greedy 兩 mapper 皆過；
+    INIT 翻轉負面測試正確判 failed；新增 `tests/test_lec.py` 8 項
+    （共 42 項全過）。目前覆蓋 techmap 一級，日後可對 EDIF 輸出再跑一級。
 
 11. **QoR 回歸系統**（學 VTR golden QoR tracking）：建立 benchmark corpus
     （MCNC → Koios 級），每次改動追蹤 CPD / wirelength / runtime 三項指標，
@@ -96,7 +103,7 @@
 ```
 1 ✅ → 2 ✅（v0.4）→ 3 ✅（v0.5）→ 4 ✅（v0.6）    （P&R 從「能跑」到「timing-driven」）
 → 5 ✅（v0.7）   （mapping 收口，Phase A 完成）
-→ 10 ‖ 9         （正確性驗證與真機靶機並行）
+→ 10 ✅（v0.8）→ 9  （LEC 迴圈收口；續攻 OpenXC7 靶機）
 → 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
 → 8, 11, 12      （按資源排）
 ```
@@ -122,3 +129,5 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
   備註：v0.6 程式碼由每小時自動接續 session 完成，本版同步補齊設計書/計劃文件。
 - v1.5（2026-10-27）：Phase A 第 5 項（cut-enumeration mapping）標記完成（efc v0.7），
   Phase A 全數完成；下一步進入 10（LEC 迴圈）‖ 9（OpenXC7 靶機）。
+- v1.6（2026-10-30）：Phase C 第 10 項（LEC 驗證迴圈）標記完成（efc v0.8）；
+  下一步進入 9（OpenXC7 靶機 xc7k325t）。
