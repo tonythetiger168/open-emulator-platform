@@ -16,7 +16,8 @@ from .timing import logic_depth, sta
 from .edif import write_edif, write_xdc
 
 def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
-                 arch=DEFAULT_ARCH, clock_ns=10.0, mapper="cut", lec=False):
+                 arch=DEFAULT_ARCH, clock_ns=10.0, mapper="cut", lec=False,
+                 xc7=None):
     spec = load_arch(arch) if not hasattr(arch, "envelope") else arch
     src = open(path, encoding="utf-8").read()
     mod = parse_verilog(src)
@@ -95,6 +96,10 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
     if xdc:
         write_xdc(xdc, nl, clock_period_ns=clock_ns)
         rep["xdc"] = xdc
+    if xc7:
+        from .xc7out import write_xc7
+        write_xc7(xc7, mapped, mod.name)
+        rep["xc7"] = xc7
     return rep
 
 def main(argv=None):
@@ -113,11 +118,14 @@ def main(argv=None):
                     help="prove netlist vs mapped LUTs with Yosys equiv (needs yosys)")
     ap.add_argument("--edif", help="write EDIF 2.0.0 netlist for Vivado")
     ap.add_argument("--xdc", help="write XDC constraints skeleton")
+    ap.add_argument("--xc7", help="write 7-series primitive Verilog (LUTn/FDRE/IBUF/OBUF) "
+                                  "for the OpenXC7/nextpnr-xilinx Vivado-free flow")
     ap.add_argument("--json")
     args = ap.parse_args(argv)
     rep = compile_file(args.verilog, args.grid, args.tracks, args.seed,
                        edif=args.edif, xdc=args.xdc, arch=args.arch,
-                       clock_ns=args.clock, mapper=args.mapper, lec=args.lec)
+                       clock_ns=args.clock, mapper=args.mapper, lec=args.lec,
+                       xc7=args.xc7)
     for k, v in rep.items():
         print(f"{k:24s}: {v}")
     if args.json:

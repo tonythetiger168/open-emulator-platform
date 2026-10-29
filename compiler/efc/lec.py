@@ -41,11 +41,13 @@ class _Names:
     """Deterministic net-id -> Verilog identifier map, shared by both emitters
     so PIs/POs/DFF-qs match by name across gold and gate."""
 
-    def __init__(self, net_names):
+    def __init__(self, net_names, priority=()):
         self.map = {}
         used = set()
-        nets = set(net_names)
-        for n, nm in sorted(net_names.items()):
+        prio = [n for n in priority if n in net_names]
+        order = prio + [n for n in sorted(net_names) if n not in set(prio)]
+        for n in order:
+            nm = net_names[n]
             base = re.sub(r"[^A-Za-z0-9_]", "_", nm) or f"n{n}"
             if base[0].isdigit():
                 base = "w_" + base

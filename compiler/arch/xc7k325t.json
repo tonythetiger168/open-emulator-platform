@@ -1,0 +1,33 @@
+{
+  "name": "xc7k325t",
+  "part": "xc7k325tffg900-2",
+  "comment": "AMD/Xilinx Kintex-7 XC7K325T (FFG900, KC705-class) — OpenXC7/nextpnr-xilinx 靶機。envelope = datasheet numbers (DS180); clb/routing timing and R/C are logical-model estimates for efc's grid P&R, NOT silicon-accurate values. 7-series CLB = 2 slices x (4 LUT6 + 8 FF) = 8 LUT6 + 16 FF, same shape as the vp1902 logical model, so pack/fabric/place/route run unchanged.",
+  "envelope": {
+    "system_logic_cells": 326080,
+    "LUT6": 203800,
+    "FF": 407600,
+    "DSP48E1": 840,
+    "BRAM36Kb": 445,
+    "SelectIO": 500
+  },
+  "clb": {
+    "luts": 8,
+    "ffs": 16,
+    "lut_k": 6,
+    "t_lut_ns": 0.10,
+    "t_ff_clkq_ns": 0.20,
+    "t_setup_ns": 0.04
+  },
+  "routing": {
+    "switch_block": { "type": "wilton", "fs": 3 },
+    "segments": [
+      { "name": "L1", "length": 1, "freq": 0.60, "r_ohm": 90.0, "c_pf": 0.08 },
+      { "name": "L2", "length": 2, "freq": 0.25, "r_ohm": 70.0, "c_pf": 0.14 },
+      { "name": "L6", "length": 6, "freq": 0.15, "r_ohm": 45.0, "c_pf": 0.33 }
+    ]
+  },
+  "io": {
+    "inputs": ["west", "north"],
+    "outputs": ["east", "south"]
+  }
+}

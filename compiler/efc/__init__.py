@@ -13,5 +13,6 @@ Pipeline (Synplify Pro analogue):
   route.py    A* timing-driven PathFinder ~ self-developed P&R
   timing.py   STA (Elmore + criticality) ~ Timing Analyst
   edif.py     EDIF 2.0.0 + XDC writers   ~ Vivado real-device path
+  xc7out.py   7-series primitive Verilog ~ OpenXC7/nextpnr-xilinx (no Vivado)
 """
-__version__ = "0.8.0"
+__version__ = "0.9.0"
