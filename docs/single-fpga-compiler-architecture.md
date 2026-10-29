@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-27 ｜ v0.6（smart-centroid 初始佈局）
+> open-emulator-platform 專案 ｜ 2026-10-27 ｜ v0.7（cut-enumeration mapping）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -24,14 +24,15 @@
    carry chain、記憶體與 DSP 推斷）。
 5. **輸出**：EDIF netlist + 約束，交給廠商 P&R（Vivado）——Synplify 到這層為止。
 
-## 3. efc pipeline 對照（v0.5）
+## 3. efc pipeline 對照（v0.7）
 
 ```
 verilog.py   語言前端（lexer/parser/AST）            ~ HDL Compiler
 netlist.py   展開 + bit-blast → generic gates        ~ HDL Analyst (RTL view)
                AND2/OR2/XOR2/NOT/MUX2/DFF
-techmap.py   gates → LUT6（greedy cone-merge）
-               + cone 追蹤 + INIT 真值表計算         ~ Technology Mapper (Tech view)
+techmap.py   mapper dispatcher + INIT 真值表計算    ~ Technology Mapper (Tech view)
+cutmap.py    gates → LUT6：cut-enumeration          ~ ABC/FlowMap 式 mapping
+               （K-feasible cuts + depth label + area flow；--mapper greedy 可 A/B）
 arch.py      架構描述檔 loader（JSON）               ~ VPR architecture XML
                CLB 結構 / segment 長度+RC / switch block / IO 策略
 pack.py      CLB 打包（8×LUT6+16FF，LUT→DFF 配對）   ~ VP1902 slice 結構
@@ -129,20 +130,20 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
 做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
-## 5. 驗證結果（v0.5，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
+## 5. 驗證結果（v0.7，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
 
 | 指標 | 值 |
 |---|---|
 | generic gates | 24 |
-| LUT6 / DFF | 12 / 4（LUT6 比 v0.1 LUT4 的 16 顆少 25%） |
+| LUT6 / DFF | 4 / 4（cut mapping；greedy 為 12，v0.1 LUT4 為 16） |
 | CLB used | 4 |
-| VP1902 LUT6 利用率 | 0.000142% |
+| VP1902 LUT6 利用率 | 0.000047% |
 | placement HPWL | 56 |
 | routing | 無壅塞（max channel 4/8，wirelength 57） |
-| router 節點展開數 | 292（BFS 版同條件 466，A* 降 2.56×，QoR 不變） |
-| logic depth | 2 |
-| critical path / est. Fmax | 0.1299 ns / ~7.7 GHz（邏輯模型估計） |
-| worst slack @10ns | +9.86 ns（--clock 0.05 正確報違例並 exit 1） |
+| router 節點展開數 | 280（v0.5 基準 292；BFS 版同條件 466，A* 展開數更少） |
+| logic depth | 1（greedy 版為 2） |
+| critical path / est. Fmax | 0.1198 ns / ~8.3 GHz（邏輯模型估計） |
+| worst slack @10ns | +9.88 ns（--clock 0.05 正確報違例並 exit 1） |
 | EDIF/XDC | 產出 OK，結構含 LUTn INIT 與 FDRE |
 
 v0.2 → v0.3 迴歸：面積/佈局/佈線數字**完全一致**（arch 檔化為純重構）。
@@ -150,6 +151,10 @@ v0.3 → v0.4：新增 STA 報表，QoR 數字不變。
 v0.4 → v0.5：router 換 A*，wirelength / max channel / 時序數字**完全一致**。
 v0.5 → v0.6：placer 換 smart-centroid 種子，alu4 QoR 數字**完全一致**；
 chain 測試中種子 HPWL ≤ 隨機種子中位數，且 SA refine 不劣化種子。
+v0.6 → v0.7：mapper 換 cut-enumeration——**LUT6 12→4（−67%）、logic depth
+2→1、CP 0.1299→0.1198 ns**；reconvergent fanout 測試 3→2 LUT（greedy
+無法合併多扇出共享邏輯，cut 以複製換面積）；dead logic 自動移除；
+`--mapper greedy` 可一鍵 A/B。
 
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
@@ -163,15 +168,19 @@ multi-source tree 接附、關鍵 net 無視壅塞走最短徑、非關鍵 net �
 懲罰邊、PathFinder 收斂且 crit 可缺省、CLI 報表含 expanded_nodes。
 `tests/test_place.py` 6 項（v0.6 新增）：種子合法且決定性、種子 HPWL ≤
 隨機種子中位數、線性鏈種子緊湊、SA refine 不劣化種子、alu4 迴歸窗、
-init="random" 相容 v0.5（共 28 項全過）。
+init="random" 相容 v0.5。
+`tests/test_cutmap.py` 6 項（v0.7 新增）：reconvergent fanout 勝 greedy、
+XOR3 單 LUT（INIT=0x96）、K=4 深度受限切兩顆、dead logic 移除、
+alu4 cut ≤ greedy、CLI 預設 mapper=cut（共 34 項全過）。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
 1. 語言子集擴充：concat/切片/case、FSM extraction（對齊 Synplify FSM Compiler）。
-2. LUT mapping 換 cut-enumeration（FlowMap 式）；BRAM/DSP58/CARRY8 推斷。
-3. ~~STA~~（v0.4）、~~A* router~~（v0.5）、~~smart-centroid 初始佈局~~（v0.6）
-   完成；下一步：cut-enumeration LUT mapping（《改進計劃》Phase A 第 5 項），
-   以及 placement 成本項消費 criticality（bound2bound 式加權）、switch block
+2. ~~LUT mapping 換 cut-enumeration~~（v0.7 完成）；BRAM/DSP58/CARRY8 推斷。
+3. ~~STA~~（v0.4）、~~A* router~~（v0.5）、~~smart-centroid 初始佈局~~（v0.6）、
+   ~~cut-enumeration mapping~~（v0.7）——《改進計劃》Phase A 全數完成；
+   下一步：LEC 驗證迴圈 ‖ OpenXC7 靶機（Phase C 第 10 ‖ 9 項），以及
+   placement 成本項消費 criticality（bound2bound 式加權）、switch block
    建模與 routing 拓撲回填。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
@@ -213,3 +222,8 @@ init="random" 相容 v0.5（共 28 項全過）。
   星型加權質心迭代種子（無 RNG、決定性）+ 貪婪合法化 + SA refine；
   `place(init="random")` 保留 v0.5 行為供 A/B；alu4 QoR 零迴歸；
   新增 `tests/test_place.py` 6 項（共 28 項全過）。
+- v0.7（2026-10-27）：**cut-enumeration LUT mapping**（改進計劃 Phase A 第 5 項）——
+  K-feasible cut 列舉 + FlowMap 式 depth label + area flow 面積回收；
+  新增 `efc/cutmap.py`，`techmap.py` 改為 dispatcher（`--mapper greedy` A/B）；
+  alu4 LUT6 12→4、depth 2→1、CP 0.1299→0.1198 ns；新增
+  `tests/test_cutmap.py` 6 項（共 34 項全過）。
