@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v0.8（LEC 驗證迴圈）
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v0.9（OpenXC7 靶機後端）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -24,7 +24,7 @@
    carry chain、記憶體與 DSP 推斷）。
 5. **輸出**：EDIF netlist + 約束，交給廠商 P&R（Vivado）——Synplify 到這層為止。
 
-## 3. efc pipeline 對照（v0.8）
+## 3. efc pipeline 對照（v0.9）
 
 ```
 verilog.py   語言前端（lexer/parser/AST）            ~ HDL Compiler
@@ -42,6 +42,8 @@ place.py     SA placement（block 級，HPWL）          ← 自研 P&R（VPR �
 route.py     A* timing-driven PathFinder             ← 自研 P&R
 timing.py    STA：Elmore RC + slack/criticality      ~ Timing Analyst
 edif.py      EDIF 2.0.0 + XDC 輸出                   ~ Synplify 出貨格式 → Vivado
+xc7out.py    7-series primitives Verilog 輸出        ~ OpenXC7/nextpnr-xilinx
+               （LUT1-6/FDRE/IBUF/OBUF；--xc7；靶機 arch/xc7k325t.json）
 ```
 
 資料結構主線：`AST → Netlist(gates) → LutNet(LUT6+DFF+INIT) →
@@ -142,7 +144,29 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 - 覆蓋範圍：netlist→LUT mapping 一級（DFF 1:1 存活故時序元素可按名
   配對）；pack/place/route 不改功能，日後可對 EDIF 輸出再跑一級 LEC。
 
-### 4.8 誠實限制
+### 4.8 OpenXC7 靶機後端（v0.9，xc7out.py + arch/xc7k325t.json）
+
+- 動機（改進計劃 Phase C 第 9 項）：VP1902 bitstream 未公開（§4.9），
+  需要一個**無 Vivado 的端到端真 bitstream 靶機**來驗證 compiler 正確性。
+  靶機選 Kintex-7 XC7K325T（FFG900，KC705 級）——OpenXC7 demo 最成熟、
+  Project X-Ray bitstream 文件最完整的元件。
+- 架構描述檔 `arch/xc7k325t.json`：envelope 用 datasheet（DS180）真值——
+  203,800 LUT6（50,950 slices×4）/ 407,600 FF / 840 DSP48E1 / 445 BRAM36 /
+  500 SelectIO；7-series CLB = 2 slices ×（4 LUT6 + 8 FF）= 8 LUT6 + 16 FF，
+  與 vp1902 邏輯模型同形，**pack/fabric/place/route 零改動直跑**，
+  `--arch xc7k325t` 一鍵切換（v0.3 arch 檔化的紅利）。
+- `xc7out.py`：mapped LutNet → flat Verilog，cell 集合恰為
+  `yosys synth_xilinx` 產出、nextpnr-xilinx 消費的 LUT1–6（.INIT）/FDRE/
+  IBUF/OBUF；PI/PO 經 IBUF/OBUF buffer（alias wire 慣例同 synth_xilinx），
+  port 保留 pin 名（`_Names` 新增 priority 參數讓 port 先取乾淨名）。
+- 無 Vivado 迴路：`efc --arch xc7k325t --xc7 out.v` → `yosys read_verilog
+  -lib +/xilinx/cells_sim.v … write_json` → `nextpnr-xilinx --chipdb …`。
+  沙箱內已驗證前兩段（Yosys 0.23 parse/stat/write_json，cell 型別全在
+  合法集合內）；**bitstream 段需 nextpnr-xilinx chipdb，沙箱外執行**。
+- 正確性鏈：golden netlist ≡（v0.8 LEC）mapped LutNet →（純格式轉換）
+  xc7 Verilog——格式層由 yosys parse/stat/JSON 煙霧測試把關。
+
+### 4.9 誠實限制
 
 **VP1902 bitstream 格式未公開**，任何第三方都無法直接產生可燒錄檔案
 （開源逆向版圖：Project X-Ray = 7-series；Project U-Ray = UltraScale/+
@@ -151,7 +175,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
 做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
-## 5. 驗證結果（v0.8，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
+## 5. 驗證結果（v0.9，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
 
 | 指標 | 值 |
 |---|---|
@@ -180,6 +204,11 @@ v0.6 → v0.7：mapper 換 cut-enumeration——**LUT6 12→4（−67%）、logi
 v0.7 → v0.8：新增 LEC 迴圈（不改 QoR 數字）——alu4 `--lec` proven
 12/12 $equiv cells，greedy/cut 兩 mapper 皆與 golden netlist 等價；
 INIT 翻轉的負面測試正確判 failed，無 yosys 環境誠實報 skipped。
+v0.8 → v0.9：新增 OpenXC7 靶機後端——`--arch xc7k325t --lec --xc7` 端到端
+實測：LUT6/FF 4/4、HPWL 56、wirelength 57 與 vp1902 全同（同形 CLB 結構），
+LEC proven 12/12；`--xc7` 輸出經 Yosys 0.23 parse/stat/write_json 驗證，
+cell 型別全在 LUT1–6/FDRE/IBUF/OBUF 合法集合（timing 數字依 xc7k325t
+估計值而異：CP 0.2446 ns @ t_lut=0.10 ns，屬預期的 per-arch 差異）。
 
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
@@ -199,8 +228,10 @@ XOR3 單 LUT（INIT=0x96）、K=4 深度受限切兩顆、dead logic 移除、
 alu4 cut ≤ greedy、CLI 預設 mapper=cut。
 `tests/test_lec.py` 8 項（v0.8 新增）：名稱消毒與 INIT 表格式、
 alu4 cut/greedy proven、reconvergent 設計兩 mapper proven、INIT 翻轉
-必判 failed、無 yosys 報 skipped 不偽造通過、CLI --lec 報表
-（共 42 項全過）。
+必判 failed、無 yosys 報 skipped 不偽造通過、CLI --lec 報表。
+`tests/test_xc7out.py` 7 項（v0.9 新增）：xc7k325t arch 載入與 envelope
+真值、LUTk INIT 位寬、名稱消毒、IBUF/OBUF 配線、Yosys parse/stat 煙霧、
+write_json cell 型別合法集合、CLI --xc7 報表（共 49 項全過）。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
@@ -208,16 +239,16 @@ alu4 cut/greedy proven、reconvergent 設計兩 mapper proven、INIT 翻轉
 2. ~~LUT mapping 換 cut-enumeration~~（v0.7 完成）；BRAM/DSP58/CARRY8 推斷。
 3. ~~STA~~（v0.4）、~~A* router~~（v0.5）、~~smart-centroid 初始佈局~~（v0.6）、
    ~~cut-enumeration mapping~~（v0.7）——《改進計劃》Phase A 全數完成；
-   ~~LEC 驗證迴圈~~（v0.8，Phase C 第 10 項）；下一步：OpenXC7 靶機
-   （Phase C 第 9 項），以及 placement 成本項消費 criticality
-   （bound2bound 式加權）、switch block 建模與 routing 拓撲回填。
+   ~~LEC 驗證迴圈~~（v0.8）、~~OpenXC7 靶機後端~~（v0.9，Phase C 第 10、9 項）；
+   下一步：placement 成本項消費 criticality（bound2bound 式加權）、
+   switch block 建模與 routing 拓撲回填、QoR 回歸系統（Phase C 第 11 項）。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
    對齊《Emulator 容量與架構對標分析》的 1→2→4→8 擴展路線。
-6. **OpenXC7（UltraScale+）後端（驗證線）**：efc → OpenXC7
-   （Yosys / nextpnr-xilinx / prjuray）出真 bitstream，全程無 Vivado。
-   元件容量小（Zynq UltraScale+ 級），價值在於給 compiler 一個
-   可上真機的端到端正確性靶機。
+6. **OpenXC7 後端（驗證線）**：~~efc 端落地~~（v0.9：`arch/xc7k325t.json`
+   + `xc7out.py`，Yosys→JSON 段沙箱內已驗證）；剩 bitstream 段——
+   nextpnr-xilinx + xc7k325t chipdb → 真 bitstream 上板，全程無 Vivado，
+   需具備 OpenXC7 工具鏈的機器執行。
 7. **固定 shell + runtime patch 評估（加速線）**：Vivado 僅跑一次產生
    shell bitstream，後續設計編譯只出 patch data（參考 Nexus 的固定
    bitstream + 指令編譯、PRflow/HiPR 的 partial reconfiguration 分頁、
@@ -262,3 +293,9 @@ alu4 cut/greedy proven、reconvergent 設計兩 mapper proven、INIT 翻轉
   error/skipped 四態（無 yosys 誠實報 skipped）；alu4 proven 12/12
   $equiv cells，INIT 翻轉負面測試正確判 failed；新增
   `tests/test_lec.py` 8 項（共 42 項全過）。
+- v0.9（2026-10-30）：**OpenXC7 靶機後端**（改進計劃 Phase C 第 9 項）——
+  新增 `arch/xc7k325t.json`（Kintex-7，envelope 為 DS180 真值）與
+  `efc/xc7out.py`（LUT1–6/FDRE/IBUF/OBUF flat Verilog，`--xc7` 開關）；
+  `_Names` 加 priority 參數讓 port 取乾淨名；Yosys parse/stat/write_json
+  段沙箱內驗證通過，bitstream 段待 nextpnr-xilinx chipdb 環境；新增
+  `tests/test_xc7out.py` 7 項（共 49 項全過）。

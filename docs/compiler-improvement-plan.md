@@ -1,6 +1,6 @@
 # efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.6
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.7
 > 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
 > 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
 > roadmap 的展開與具體化。
@@ -75,9 +75,16 @@
 
 ### Phase C：正確性驗證與生態落地
 
-9. **OpenXC7 驗證線落地**（原 roadmap 第 6 項具體化）：
-   efc 輸出 nextpnr-xilinx 可接受的 netlist；靶機選 Kintex-7（xc7k325t，
-   OpenXC7 demo 最成熟），打通「efc → 真 bitstream → 上板」的無 Vivado 迴路。
+9. **OpenXC7 驗證線落地**（原 roadmap 第 6 項具體化）—— ✅ **efc 端已完成
+   （v0.9，2026-10-30）**：落地 `arch/xc7k325t.json`（Kintex-7 FFG900，
+   envelope = DS180 真值：203,800 LUT6 / 407,600 FF / 840 DSP48E1；
+   CLB 同形 8×LUT6+16FF，P&R 零改動）+ `efc/xc7out.py`——mapped LutNet
+   輸出 LUT1–6/FDRE/IBUF/OBUF flat Verilog（`--xc7`），即 `synth_xilinx`
+   產出、nextpnr-xilinx 消費的 cell 集合；Yosys 0.23 parse/stat/
+   write_json 段沙箱內驗證通過（cell 型別全合法）；新增
+   `tests/test_xc7out.py` 7 項（共 49 項全過）。**誠實標記**：真
+   bitstream 段（nextpnr-xilinx + xc7k325t chipdb → 上板）需 OpenXC7
+   工具鏈環境，在沙箱外執行。
 
 10. **LEC 驗證迴圈**（學 OpenFPGA / VTR flow）—— ✅ **已完成（v0.8，2026-10-30）**：
     每級 pass 後做 SAT-based equivalence check。落地：新增 `efc/lec.py`——
@@ -103,9 +110,10 @@
 ```
 1 ✅ → 2 ✅（v0.4）→ 3 ✅（v0.5）→ 4 ✅（v0.6）    （P&R 從「能跑」到「timing-driven」）
 → 5 ✅（v0.7）   （mapping 收口，Phase A 完成）
-→ 10 ✅（v0.8）→ 9  （LEC 迴圈收口；續攻 OpenXC7 靶機）
+→ 10 ✅（v0.8）→ 9 ✅（v0.9）  （正確性驗證與靶機後端收口）
+→ 11             （QoR 回歸系統： benchmark corpus + golden 追蹤）
 → 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
-→ 8, 11, 12      （按資源排）
+→ 8, 12          （按資源排）
 ```
 
 RL / ML move selection（RLPlace、VPR-Evolve 路線）留作前瞻：等 benchmark
@@ -131,3 +139,6 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
   Phase A 全數完成；下一步進入 10（LEC 迴圈）‖ 9（OpenXC7 靶機）。
 - v1.6（2026-10-30）：Phase C 第 10 項（LEC 驗證迴圈）標記完成（efc v0.8）；
   下一步進入 9（OpenXC7 靶機 xc7k325t）。
+- v1.7（2026-10-30）：Phase C 第 9 項（OpenXC7 靶機後端）efc 端標記完成
+  （efc v0.9）；bitstream 段待 OpenXC7 工具鏈環境。下一步進入 11
+  （QoR 回歸系統）或 6/7（商用結構對齊）。

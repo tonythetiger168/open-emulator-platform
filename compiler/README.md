@@ -3,8 +3,10 @@
 參考 Synplify Pro 架構的單顆 FPGA 編譯器，含**自研 P&R**
 （smart-centroid + SA placement、A* timing-driven PathFinder routing、
 cut-enumeration LUT mapping、SAT-based LEC 等價驗證），並可輸出
-**EDIF 2.0.0 網表 + XDC 約束**接 Vivado 跑真機（xcvp1902）。
-目標元件由 **data-driven 架構描述檔**（`arch/vp1902.json`）定義，
+**EDIF 2.0.0 網表 + XDC 約束**接 Vivado 跑真機（xcvp1902），或輸出
+**7-series primitives Verilog** 走 OpenXC7/nextpnr-xilinx 無 Vivado 迴路
+（靶機 Kintex-7 xc7k325t）。
+目標元件由 **data-driven 架構描述檔**（`arch/vp1902.json`、`arch/xc7k325t.json`）定義，
 換元件不必改演算法。設計書見 `docs/single-fpga-compiler-architecture.md`；
 改進計劃見 `docs/compiler-improvement-plan.md`。
 
@@ -22,6 +24,7 @@ cut-enumeration LUT mapping、SAT-based LEC 等價驗證），並可輸出
 | Routing（A* timing-driven PathFinder） | `efc/route.py` | 同上 |
 | STA（Elmore + slack/criticality） | `efc/timing.py` | Timing Analyst |
 | EDIF/XDC 輸出 | `efc/edif.py` | Synplify 的 EDIF+SDC 出貨格式 |
+| 7-series primitives 輸出（`--xc7`） | `efc/xc7out.py` | —（OpenXC7/nextpnr-xilinx 無 Vivado 路徑） |
 
 ## VP1902 目標
 
@@ -47,6 +50,14 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 `--mapper {cut,greedy}` 切換 LUT mapper（預設 cut-enumeration，greedy 供 A/B）。
 `--lec` 對 mapping 結果跑 SAT 等價驗證（需 yosys；proven/failed/skipped
 三態，無 yosys 時誠實報 skipped 不偽造通過，failed/error 時 CLI exit 1）。
+`--xc7 out.v` 輸出 7-series primitives Verilog（LUT1–6/FDRE/IBUF/OBUF，
+搭配 `--arch xc7k325t`），接續指令：
+
+```bash
+yosys -p "read_verilog -lib +/xilinx/cells_sim.v; read_verilog out.v; \
+    hierarchy -top <top> -purge_lib; proc; write_json out.json"
+nextpnr-xilinx --chipdb <xc7k325t chipdb> --json out.json  # 需 OpenXC7 chipdb
+```
 
 ## Verilog 子集（MVP）
 
@@ -71,6 +82,9 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
    （VP1902 詳細 timing 未公開）。
 6. Placement 的 centroid seeding 之 legalization 是 greedy nearest-free-slot
    （O(nb×slots)）；設計規模變大後換 Hungarian/auction 求解器。
+7. `--xc7` 輸出已驗證可被 stock Yosys 讀取並轉出 nextpnr-xilinx 用的 JSON
+   （cell 集合限 LUT1–6/FDRE/IBUF/OBUF）；**bitstream 段需 nextpnr-xilinx +
+   xc7k325t chipdb（Project X-Ray 資料），在本沙箱外執行，尚未上板**。
 
 ## Roadmap
 
@@ -84,7 +98,8 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 - [ ] switch block 建模 + routing 拓撲延遲回填（消費 arch segment/R-C 表）
 - [x] Arch 描述檔化（v0.3；`arch/vp1902.json` + `efc/arch.py`）
 - [x] EDIF/XDC 輸出接 Vivado（v0.2；真機驗證待跑）
-- [ ] OpenXC7（UltraScale+）目標後端：不需 Vivado 的端到端真 bitstream 驗證靶機
+- [x] OpenXC7 靶機後端（v0.9：`arch/xc7k325t.json` + `--xc7` 7-series primitives
+      輸出，Yosys→JSON 段已驗證；bitstream 段待 nextpnr-xilinx chipdb 環境）
 - [ ] 固定 shell + runtime patch（overlay/PR）評估：迭代編譯去 Vivado 化；
       注意 overlay 面積 overhead 約 2–10×，僅適合中小設計快速迭代
 - [ ] multi-FPGA partition（對齊 roadmap Phase 2，參考 Siemens VPS）
