@@ -1,6 +1,6 @@
 # efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.7
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.8
 > 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
 > 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
 > roadmap 的展開與具體化。
@@ -97,9 +97,20 @@
     INIT 翻轉負面測試正確判 failed；新增 `tests/test_lec.py` 8 項
     （共 42 項全過）。目前覆蓋 techmap 一級，日後可對 EDIF 輸出再跑一級。
 
-11. **QoR 回歸系統**（學 VTR golden QoR tracking）：建立 benchmark corpus
-    （MCNC → Koios 級），每次改動追蹤 CPD / wirelength / runtime 三項指標，
-    防止改 A 壞 B。
+11. **QoR 回歸系統**（學 VTR golden QoR tracking）—— ✅ **已完成（v0.10，2026-10-30）**：
+    建立 benchmark corpus 與 golden 追蹤，防止改 A 壞 B。落地：新增
+    `efc/qor.py` + `benchmarks/` 5 設計語料（alu4/maj4/mixer8/regpipe8/sel4，
+    全在 Verilog 子集內、覆蓋純組合/時序/多分支）；**確定性指標精確比對**
+    （LUTs/DFF/PI/PO/CLB/logic depth/CP ±1e-12/HPWL/wirelength/channel
+    用量/展開節點數/LEC 狀態），**runtime 只記錄漂移 % 永不斷言**
+    （機器相關）；LEC 納入 golden，--check 端無 yosys 時 skipped 視中立
+    （不偽造通過也不誤報）；grid 依 PI/PO 自動定尺寸
+    （`max(8, ceil(max(PI,PO)/2)+2)`，因 fabric IO 容量 = 2×grid）並寫入
+    golden 保證 --update/--check 一致。首版 golden：5/5 LEC proven；
+    `--check` 重跑零漂移、回歸即 exit 1。新增 `tests/test_qor.py` 13 項
+    （共 62 項全過）。**誠實標記**：golden 鎖的是當前演算法行為而非品質
+    上界，故意改進時以 `--update` 重記並在 commit message 說明；語料規模
+    仍為自製小設計（MCNC/Koios 級語料待 Verilog 子集擴充後引入）。
 
 12. **shell+patch 線用 RapidWright 落地**（原 roadmap 第 7 項具體化）：
     pre-implemented blocks 直接對應「固定 shell + 局部 patch」，站在 AMD 官方
@@ -111,14 +122,14 @@
 1 ✅ → 2 ✅（v0.4）→ 3 ✅（v0.5）→ 4 ✅（v0.6）    （P&R 從「能跑」到「timing-driven」）
 → 5 ✅（v0.7）   （mapping 收口，Phase A 完成）
 → 10 ✅（v0.8）→ 9 ✅（v0.9）  （正確性驗證與靶機後端收口）
-→ 11             （QoR 回歸系統： benchmark corpus + golden 追蹤）
+→ 11 ✅（v0.10） （QoR 回歸系統： benchmark corpus + golden 追蹤）
 → 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
 → 8, 12          （按資源排）
 ```
 
-RL / ML move selection（RLPlace、VPR-Evolve 路線）留作前瞻：等 benchmark
-corpus 建立後，再考慮用 RL agent 或 LLM-driven evolution 對自家 codebase
-做 QoR 演化。
+RL / ML move selection（RLPlace、VPR-Evolve 路線）留作前瞻：benchmark
+corpus 已於 v0.10 建立（前置條件滿足），可考慮用 RL agent 或 LLM-driven
+evolution 對自家 codebase 做 QoR 演化，以 `--check` 為適應度閘門。
 
 ## 4. 誠實聲明
 
@@ -142,3 +153,8 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
 - v1.7（2026-10-30）：Phase C 第 9 項（OpenXC7 靶機後端）efc 端標記完成
   （efc v0.9）；bitstream 段待 OpenXC7 工具鏈環境。下一步進入 11
   （QoR 回歸系統）或 6/7（商用結構對齊）。
+- v1.8（2026-10-30）：Phase C 第 11 項（QoR 回歸系統）標記完成
+  （efc v0.10：`efc/qor.py` + `benchmarks/` 5 設計語料 + golden.json，
+  確定性指標精確比對、runtime 僅記漂移、LEC 納入 golden）；RL/ML 前瞻
+  的前置條件（corpus）已滿足。下一步進入 6/7（商用結構對齊：
+  prepacking molecules、floorplanning constraints）。

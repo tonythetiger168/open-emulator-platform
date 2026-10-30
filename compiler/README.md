@@ -25,6 +25,7 @@ cut-enumeration LUT mapping、SAT-based LEC 等價驗證），並可輸出
 | STA（Elmore + slack/criticality） | `efc/timing.py` | Timing Analyst |
 | EDIF/XDC 輸出 | `efc/edif.py` | Synplify 的 EDIF+SDC 出貨格式 |
 | 7-series primitives 輸出（`--xc7`） | `efc/xc7out.py` | —（OpenXC7/nextpnr-xilinx 無 Vivado 路徑） |
+| QoR golden 回歸（`benchmarks/`） | `efc/qor.py` | —（VTR golden-QoR 追蹤） |
 
 ## VP1902 目標
 
@@ -59,6 +60,15 @@ yosys -p "read_verilog -lib +/xilinx/cells_sim.v; read_verilog out.v; \
 nextpnr-xilinx --chipdb <xc7k325t chipdb> --json out.json  # 需 OpenXC7 chipdb
 ```
 
+QoR 回歸（v0.10）：`benchmarks/` 語料庫（alu4/maj4/mixer8/regpipe8/sel4）
+跑完整 flow，`golden.json` 鎖定確定性指標（LUTs/DFF/CLB/logic depth/CP/
+HPWL/wirelength/channel 用量/LEC 狀態），runtime 只記錄漂移不斷言：
+
+```bash
+python3 -m efc.qor --update   # 在已知良好樹上記錄 golden（建議帶 yosys）
+python3 -m efc.qor --check    # 比對 golden，有任何確定性漂移即 exit 1
+```
+
 ## Verilog 子集（MVP）
 
 - `module/input/output/wire/reg`、`assign`（`~ & | ^`、括號、常數）
@@ -85,6 +95,9 @@ nextpnr-xilinx --chipdb <xc7k325t chipdb> --json out.json  # 需 OpenXC7 chipdb
 7. `--xc7` 輸出已驗證可被 stock Yosys 讀取並轉出 nextpnr-xilinx 用的 JSON
    （cell 集合限 LUT1–6/FDRE/IBUF/OBUF）；**bitstream 段需 nextpnr-xilinx +
    xc7k325t chipdb（Project X-Ray 資料），在本沙箱外執行，尚未上板**。
+8. QoR golden（`benchmarks/golden.json`）鎖的是**當前演算法行為**而非
+   品質上界——允許故意改進時以 `--update` 重記（應在 commit message 說明
+   哪些指標變動、為何可接受）；runtime 欄位永不斷言，僅供漂移參考。
 
 ## Roadmap
 
@@ -100,6 +113,8 @@ nextpnr-xilinx --chipdb <xc7k325t chipdb> --json out.json  # 需 OpenXC7 chipdb
 - [x] EDIF/XDC 輸出接 Vivado（v0.2；真機驗證待跑）
 - [x] OpenXC7 靶機後端（v0.9：`arch/xc7k325t.json` + `--xc7` 7-series primitives
       輸出，Yosys→JSON 段已驗證；bitstream 段待 nextpnr-xilinx chipdb 環境）
+- [x] QoR golden 回歸系統（v0.10：`efc/qor.py` + `benchmarks/` 5 設計語料，
+      確定性指標精確比對、runtime 僅記錄漂移，LEC 納入 golden）
 - [ ] 固定 shell + runtime patch（overlay/PR）評估：迭代編譯去 Vivado 化；
       注意 overlay 面積 overhead 約 2–10×，僅適合中小設計快速迭代
 - [ ] multi-FPGA partition（對齊 roadmap Phase 2，參考 Siemens VPS）
