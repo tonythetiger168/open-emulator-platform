@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v0.9（OpenXC7 靶機後端）
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v0.10（QoR golden 回歸系統）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -24,7 +24,7 @@
    carry chain、記憶體與 DSP 推斷）。
 5. **輸出**：EDIF netlist + 約束，交給廠商 P&R（Vivado）——Synplify 到這層為止。
 
-## 3. efc pipeline 對照（v0.9）
+## 3. efc pipeline 對照（v0.10）
 
 ```
 verilog.py   語言前端（lexer/parser/AST）            ~ HDL Compiler
@@ -44,6 +44,7 @@ timing.py    STA：Elmore RC + slack/criticality      ~ Timing Analyst
 edif.py      EDIF 2.0.0 + XDC 輸出                   ~ Synplify 出貨格式 → Vivado
 xc7out.py    7-series primitives Verilog 輸出        ~ OpenXC7/nextpnr-xilinx
                （LUT1-6/FDRE/IBUF/OBUF；--xc7；靶機 arch/xc7k325t.json）
+qor.py       QoR golden 回歸（benchmarks/ 語料）     ~ VTR golden-QoR 追蹤
 ```
 
 資料結構主線：`AST → Netlist(gates) → LutNet(LUT6+DFF+INIT) →
@@ -146,7 +147,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 
 ### 4.8 OpenXC7 靶機後端（v0.9，xc7out.py + arch/xc7k325t.json）
 
-- 動機（改進計劃 Phase C 第 9 項）：VP1902 bitstream 未公開（§4.9），
+- 動機（改進計劃 Phase C 第 9 項）：VP1902 bitstream 未公開（§4.10），
   需要一個**無 Vivado 的端到端真 bitstream 靶機**來驗證 compiler 正確性。
   靶機選 Kintex-7 XC7K325T（FFG900，KC705 級）——OpenXC7 demo 最成熟、
   Project X-Ray bitstream 文件最完整的元件。
@@ -166,7 +167,31 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 - 正確性鏈：golden netlist ≡（v0.8 LEC）mapped LutNet →（純格式轉換）
   xc7 Verilog——格式層由 yosys parse/stat/JSON 煙霧測試把關。
 
-### 4.9 誠實限制
+### 4.9 QoR golden 回歸系統（v0.10，qor.py + benchmarks/）
+
+- 動機（改進計劃 Phase C 第 11 項）：VTR 的 golden-QoR 做法——每次演算法
+  改動，用固定語料庫的**確定性指標快照**守住「修了 A 卻弄壞 B」。
+  efc 的 unittest 只驗證功能正確性；QoR 回歸驗證的是品質指標不漂移。
+- 語料庫 `benchmarks/`：alu4（既有 example）、maj4（多數決邏輯 +
+  reconvergent）、mixer8（2:1 mux 陣列）、regpipe8（兩級 pipeline）、
+  sel4（if-else 分支）——覆蓋純組合/時序/多分支，全在 Verilog 子集內。
+- 指標分兩類：**確定性指標精確比對**（LUTs/DFF/PI/PO/CLB_used/
+  logic_depth_LUT/critical_path_ns（±1e-12 容忍 repr 雜訊）/placement_hpwl/
+  route_wirelength/route_max_channel/route_overused_channels/
+  route_expanded_nodes/lec 狀態）；**runtime_s 只記錄、永不斷言**
+  （機器相關），以漂移 % 列報。
+- Grid 自動定尺寸：fabric IO 容量 = 2×grid（每方向類別），故
+  `grid = max(8, ceil(max(PI,PO)/2) + 2)`——決定性、寫入 golden，
+  --update 與 --check 一致（mixer8/regpipe8 有 25 個 PI，8×8 放不下）。
+- LEC 納入 golden：--update 時建議帶 yosys（記錄 proven）；--check 端
+  若無 yosys，current 為 skipped 視為**中立**（不偽造通過也不誤報回歸），
+  與 v0.8 的誠實語義一致。
+- 用法：`python3 -m efc.qor --update`（已知良好樹上記錄）/
+  `--check`（預設，漂移即 exit 1）/`--json out.json`（匯出當前指標）。
+  故意改進導致指標變動時，以 --update 重記並在 commit message 說明
+  哪些指標變動、為何可接受（golden 鎖的是當前行為，非品質上界）。
+
+### 4.10 誠實限制
 
 **VP1902 bitstream 格式未公開**，任何第三方都無法直接產生可燒錄檔案
 （開源逆向版圖：Project X-Ray = 7-series；Project U-Ray = UltraScale/+
@@ -175,7 +200,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
 做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
-## 5. 驗證結果（v0.9，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
+## 5. 驗證結果（v0.10，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
 
 | 指標 | 值 |
 |---|---|
@@ -209,6 +234,11 @@ v0.8 → v0.9：新增 OpenXC7 靶機後端——`--arch xc7k325t --lec --xc7` �
 LEC proven 12/12；`--xc7` 輸出經 Yosys 0.23 parse/stat/write_json 驗證，
 cell 型別全在 LUT1–6/FDRE/IBUF/OBUF 合法集合（timing 數字依 xc7k325t
 估計值而異：CP 0.2446 ns @ t_lut=0.10 ns，屬預期的 per-arch 差異）。
+v0.9 → v0.10：新增 QoR 回歸系統（不改任何演算法行為）——`benchmarks/`
+5 設計語料首版 golden：alu4/sel4 4 LUT/4 DFF（depth 1，CP 0.1198 ns）、
+maj4 4 LUT（grid 11）、mixer8 8 LUT（grid 15）、regpipe8 16 LUT
+（depth 1，CP 0.1898 ns，grid 15），5/5 LEC proven；`--check` 重跑
+全部指標零漂移。
 
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
@@ -231,7 +261,13 @@ alu4 cut/greedy proven、reconvergent 設計兩 mapper proven、INIT 翻轉
 必判 failed、無 yosys 報 skipped 不偽造通過、CLI --lec 報表。
 `tests/test_xc7out.py` 7 項（v0.9 新增）：xc7k325t arch 載入與 envelope
 真值、LUTk INIT 位寬、名稱消毒、IBUF/OBUF 配線、Yosys parse/stat 煙霧、
-write_json cell 型別合法集合、CLI --xc7 報表（共 49 項全過）。
+write_json cell 型別合法集合、CLI --xc7 報表。
+`tests/test_qor.py` 13 項（v0.10 新增）：語料存在且全數可編譯、
+auto_grid 對齊 fabric IO 容量、golden 鍵完整、相同輸入零違例、
+注入 LUTs+1 與 CP 漂移必被捕獲、runtime×10 不觸發違例（僅列漂移）、
+新增/缺失 benchmark 必被標記、LEC skipped 中立與 failed 必報、
+golden 與當前重跑一致、逐 bench LEC proven、main --check exit 0
+（共 62 項全過）。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
@@ -239,9 +275,10 @@ write_json cell 型別合法集合、CLI --xc7 報表（共 49 項全過）。
 2. ~~LUT mapping 換 cut-enumeration~~（v0.7 完成）；BRAM/DSP58/CARRY8 推斷。
 3. ~~STA~~（v0.4）、~~A* router~~（v0.5）、~~smart-centroid 初始佈局~~（v0.6）、
    ~~cut-enumeration mapping~~（v0.7）——《改進計劃》Phase A 全數完成；
-   ~~LEC 驗證迴圈~~（v0.8）、~~OpenXC7 靶機後端~~（v0.9，Phase C 第 10、9 項）；
+   ~~LEC 驗證迴圈~~（v0.8）、~~OpenXC7 靶機後端~~（v0.9，Phase C 第 10、9 項）、
+   ~~QoR 回歸系統~~（v0.10，Phase C 第 11 項）；
    下一步：placement 成本項消費 criticality（bound2bound 式加權）、
-   switch block 建模與 routing 拓撲回填、QoR 回歸系統（Phase C 第 11 項）。
+   switch block 建模與 routing 拓撲回填、prepacking molecules（Phase B）。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
    對齊《Emulator 容量與架構對標分析》的 1→2→4→8 擴展路線。
@@ -299,3 +336,9 @@ write_json cell 型別合法集合、CLI --xc7 報表（共 49 項全過）。
   `_Names` 加 priority 參數讓 port 取乾淨名；Yosys parse/stat/write_json
   段沙箱內驗證通過，bitstream 段待 nextpnr-xilinx chipdb 環境；新增
   `tests/test_xc7out.py` 7 項（共 49 項全過）。
+- v0.10（2026-10-30）：**QoR golden 回歸系統**（改進計劃 Phase C 第 11 項）——
+  新增 `efc/qor.py` 與 `benchmarks/` 5 設計語料（alu4/maj4/mixer8/
+  regpipe8/sel4）：12 項確定性指標精確比對（CP ±1e-12）、runtime 只記錄
+  漂移不斷言、LEC 納入 golden（skipped 中立）；grid 依 PI/PO 自動定尺寸
+  並寫入 golden；`--update/--check/--json` CLI，回歸即 exit 1；新增
+  `tests/test_qor.py` 13 項（共 62 項全過）。
