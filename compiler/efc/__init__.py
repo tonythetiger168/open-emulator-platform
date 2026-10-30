@@ -14,5 +14,6 @@ Pipeline (Synplify Pro analogue):
   timing.py   STA (Elmore + criticality) ~ Timing Analyst
   edif.py     EDIF 2.0.0 + XDC writers   ~ Vivado real-device path
   xc7out.py   7-series primitive Verilog ~ OpenXC7/nextpnr-xilinx (no Vivado)
+  qor.py      QoR golden regression       ~ VTR golden-QoR tracking
 """
-__version__ = "0.9.0"
+__version__ = "0.10.0"
