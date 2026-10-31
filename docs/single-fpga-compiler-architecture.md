@@ -1,6 +1,6 @@
 # 單顆 FPGA Compiler 架構設計書
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v0.10（QoR golden 回歸系統）
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v0.11（prepacking molecules）
 > 參考 Synplify Pro 架構，含自研 P&R。程式碼：`compiler/`（Python，`examples/alu4.v` 端到端可跑）。
 
 ## 1. 目標與範圍
@@ -24,7 +24,7 @@
    carry chain、記憶體與 DSP 推斷）。
 5. **輸出**：EDIF netlist + 約束，交給廠商 P&R（Vivado）——Synplify 到這層為止。
 
-## 3. efc pipeline 對照（v0.10）
+## 3. efc pipeline 對照（v0.11）
 
 ```
 verilog.py   語言前端（lexer/parser/AST）            ~ HDL Compiler
@@ -37,7 +37,8 @@ lec.py       netlist vs LUT 網表 SAT 等價驗證        ~ Formality/LEC
                （Yosys equiv_make/simple/induct；--lec；無 yosys 報 skipped）
 arch.py      架構描述檔 loader（JSON）               ~ VPR architecture XML
                CLB 結構 / segment 長度+RC / switch block / IO 策略
-pack.py      CLB 打包（8×LUT6+16FF，LUT→DFF 配對）   ~ VP1902 slice 結構
+prepack.py   分子分組（lutff 強制配對 / carry8 鏈）   ~ VPR prepacker
+pack.py      CLB 打包（8×LUT6+16FF，分子 atomic 裝箱） ~ VP1902 slice 結構
 place.py     SA placement（block 級，HPWL）          ← 自研 P&R（VPR 式）
 route.py     A* timing-driven PathFinder             ← 自研 P&R
 timing.py    STA：Elmore RC + slack/criticality      ~ Timing Analyst
@@ -83,10 +84,23 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 誠實標記：timing 與 R/C 是邏輯模型估計值，非矽真值（VP1902 詳細 timing
 未公開）；v0.3 的 grid P&R 仍為 unit-length 邊，segment 表供後續 pass 消費。
 
-### 4.3 CLB packing（pack.py）
+### 4.3 Prepack + CLB packing（prepack.py / pack.py，v0.11 重構）
 
-- LUT→DFF 獨佔配對放同一 CLB（經典 BLE 模式），剩餘 cell 以共享 net
-  最多的 first-fit 裝箱；容量上限 8 LUT6 + 16 FF / CLB。
+- **Prepack molecules**（v0.11，改進計劃 Phase B 第 6 項）：packing 前先把
+  cell 組成不可拆分子（VPR prepacker 對應）——
+  - `lutff`：LUT→DFF 獨佔強制配對（經典 BLE 模式；把 v0.1 起隱含在
+    pack.py 的配對規則提升為顯式、可檢視的分子）。
+  - `carry8`：有序進位鏈，≤8 LUT/分子（VP1902 CARRY8 恰好佔一個 CLB），
+    容量越界、cell 不在網表內、cell 重複入鏈皆以 ValueError 拒絕。
+    **誠實標記**：鏈目前由 `LutNet.carry_chains` 標註注入（單元測試
+    覆蓋）；Verilog 子集尚無 `+` 算子，端到端啟用待前端算術推斷，
+    BRAM/DSP58 分子同理。
+  - `single`：其餘 cell。
+- **Packing**：分子 atomic 裝箱——lutff/carry8 自開 CLB seed block，
+  single LUT 以共享 net 最多 first-fit、single FF first-fit；
+  容量上限 8 LUT6 + 16 FF / CLB。分子順序（carry8 → lutff 依 DFF 序 →
+  singles 依網表序）與 v0.10 逐相位一致，**無 carry chain 的設計 packing
+  結果與 v0.10 bit-identical**（由 qor golden 守門，5/5 零漂移）。
 - packing 後產生 block 級外部網表，供 block-level placement/routing。
 
 ### 4.4 STA（v0.4，timing.py）
@@ -200,7 +214,7 @@ envelope 數字自 v0.3 起存於 `arch/vp1902.json`，不再硬編碼。
 可作 Vivado 約束引導；③ 若用開放 bitstream 元件（iCE40/ECP5/UltraScale+）
 做教學板可直接出真 bitstream。真機主流路徑 = 自研前端 + EDIF → Vivado。
 
-## 5. 驗證結果（v0.10，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
+## 5. 驗證結果（v0.11，examples/alu4.v，8×8 邏輯格、8 tracks、10 ns clock）
 
 | 指標 | 值 |
 |---|---|
@@ -239,6 +253,11 @@ v0.9 → v0.10：新增 QoR 回歸系統（不改任何演算法行為）——`
 maj4 4 LUT（grid 11）、mixer8 8 LUT（grid 15）、regpipe8 16 LUT
 （depth 1，CP 0.1898 ns，grid 15），5/5 LEC proven；`--check` 重跑
 全部指標零漂移。
+v0.10 → v0.11：pack 重構為 prepack 分子 + atomic 裝箱——**全部確定性
+QoR 指標零漂移**（golden 首個實戰驗證：重構前後 `--check` 皆過），
+golden 以 --update 僅新增 `molecules` 追蹤欄位（commit message 已載明）；
+語料 5 設計全為暫存器輸出故 lutff 全配對（single=0），synthetic
+carry8 鏈 4-bit 打包進單一 CLB、8-bit 合法 / 9-bit 拒絕。
 
 `tests/test_smoke.py` 4 項：端到端不變量、AND2→LUT2 INIT=0x8、
 MUX cone→LUT3 INIT 寬度、EDIF/XDC 內容標記。
@@ -266,8 +285,12 @@ write_json cell 型別合法集合、CLI --xc7 報表。
 auto_grid 對齊 fabric IO 容量、golden 鍵完整、相同輸入零違例、
 注入 LUTs+1 與 CP 漂移必被捕獲、runtime×10 不觸發違例（僅列漂移）、
 新增/缺失 benchmark 必被標記、LEC skipped 中立與 failed 必報、
-golden 與當前重跑一致、逐 bench LEC proven、main --check exit 0
-（共 62 項全過）。
+golden 與當前重跑一致、逐 bench LEC proven、main --check exit 0。
+`tests/test_prepack.py` 9 項（v0.11 新增）：alu4 全 lutff 配對且 cell
+守恆、fanout-2 net 不配對、PI 直驅 DFF 保持 single、carry8 鏈成單一
+分子且位序保持、鏈 atomic 入單一 CLB、9-bit 越界/陌生 cell/重複入鏈
+皆拒絕、alu4 packing 與 v0.10 一致（4 CLB、每塊 1+1、14 條外部網）、
+CLI 報表含 molecules 行（共 71 項全過）。
 
 ## 6. Roadmap（對齊專案 Phase 1→2）
 
@@ -276,9 +299,10 @@ golden 與當前重跑一致、逐 bench LEC proven、main --check exit 0
 3. ~~STA~~（v0.4）、~~A* router~~（v0.5）、~~smart-centroid 初始佈局~~（v0.6）、
    ~~cut-enumeration mapping~~（v0.7）——《改進計劃》Phase A 全數完成；
    ~~LEC 驗證迴圈~~（v0.8）、~~OpenXC7 靶機後端~~（v0.9，Phase C 第 10、9 項）、
-   ~~QoR 回歸系統~~（v0.10，Phase C 第 11 項）；
+   ~~QoR 回歸系統~~（v0.10，Phase C 第 11 項）、~~prepacking molecules~~
+   （v0.11，Phase B 第 6 項）；
    下一步：placement 成本項消費 criticality（bound2bound 式加權）、
-   switch block 建模與 routing 拓撲回填、prepacking molecules（Phase B）。
+   switch block 建模與 routing 拓撲回填、floorplanning constraints（Phase B）。
 4. EDIF 在真 Vivado 上驗證（link_design → bitstream 全流程）。
 5. multi-FPGA partition pass（TDM pin-muxing，參考 Siemens VPS）——
    對齊《Emulator 容量與架構對標分析》的 1→2→4→8 擴展路線。
@@ -342,3 +366,11 @@ golden 與當前重跑一致、逐 bench LEC proven、main --check exit 0
   漂移不斷言、LEC 納入 golden（skipped 中立）；grid 依 PI/PO 自動定尺寸
   並寫入 golden；`--update/--check/--json` CLI，回歸即 exit 1；新增
   `tests/test_qor.py` 13 項（共 62 項全過）。
+- v0.11（2026-10-30）：**prepacking molecules**（改進計劃 Phase B 第 6 項）——
+  新增 `efc/prepack.py`（VPR prepacker 對應）：lutff 強制配對提升為顯式
+  分子、carry8 有序鏈分子（≤8 bit 對齊 VP1902 CARRY8，容量/歸屬/重複
+  校驗）、single 預設；`pack.py` 改為分子 atomic 裝箱，無 carry chain 的
+  設計與 v0.10 **bit-identical**（qor golden 5/5 零漂移——golden 首次
+  實戰守門成功）；CLI 報表新增 `molecules` 行並納入 QoR 追蹤；
+  新增 `tests/test_prepack.py` 9 項（共 71 項全過）。誠實標記：carry8
+  端到端啟用待前端 `+` 推斷，BRAM/DSP58 分子待記憶體/算術推斷。
