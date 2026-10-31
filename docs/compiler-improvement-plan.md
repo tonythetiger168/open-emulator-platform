@@ -1,6 +1,6 @@
 # efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.9
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.10
 > 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
 > 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
 > roadmap 的展開與具體化。
@@ -64,8 +64,19 @@
 
 ### Phase B：結構對齊商用流程
 
-6. **Prepacking molecules**（VPR prepacker）：CARRY8 chain、LUT-FF 強制配對、
-   BRAM / DSP58 作為不可拆分子進 packer，對齊 VP1902 硬體結構。
+6. **Prepacking molecules**（VPR prepacker）—— ✅ **已完成（v0.11，2026-10-30）**：
+   CARRY8 chain、LUT-FF 強制配對作為不可拆分子進 packer。落地：新增
+   `efc/prepack.py`——Molecule（single/lutff/carry8）+ `prepack()` +
+   `molecule_stats()`；lutff 把 v0.1 起隱含的 LUT→DFF 獨佔配對提升為顯式
+   分子；carry8 為有序鏈分子（≤8 bit 對齊 VP1902 CARRY8 一 CLB 容量，
+   越界/陌生 cell/重複入鏈皆 ValueError）；`pack.py` 改為分子 atomic
+   裝箱（lutff/carry8 自開 CLB，singles first-fit），無 carry chain 時
+   與 v0.10 **bit-identical**——qor golden 5/5 零漂移（golden 首次實戰
+   守門）。CLI 報表新增 `molecules` 行並納入 QoR 確定性追蹤；新增
+   `tests/test_prepack.py` 9 項（共 71 項全過）。**誠實標記**：Verilog
+   子集尚無 `+` 算子，carry8 端到端待前端算術推斷（目前由
+   `LutNet.carry_chains` 標註注入、單元測試覆蓋）；BRAM/DSP58 分子
+   框架已可容納，待記憶體/DSP 推斷落地後啟用。
 
 7. **Floorplanning constraints**（VTR 9 新增能力）：對應 emulator 的 module 級
    floorplan，更是 multi-FPGA partition（Phase 2）的前置能力。戰略價值高。
@@ -140,7 +151,8 @@
 → 5 ✅（v0.7）   （mapping 收口，Phase A 完成）
 → 10 ✅（v0.8）→ 9 ✅（v0.9）  （正確性驗證與靶機後端收口）
 → 11 ✅（v0.10） （QoR 回歸系統： benchmark corpus + golden 追蹤）
-→ 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
+→ 6 ✅（v0.11）  （prepacking molecules： lutff 框架化 + carry8 鏈）
+→ 7              （floorplanning constraints： 鋪 multi-FPGA partition 的路）
 → 8, 12          （按資源排）
 → 13, 14         （生態整合評估： 除錯觀測層、主機通道選型——
                   硬體就緒時啟動，不阻塞軟體主線）
@@ -183,3 +195,7 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
   最近對標；據此新增 Phase C 第 13 項（除錯觀測層：LiteScope /
   fpgacapZero 評估）與第 14 項（主機通道：LitePCIe vs XDMA、
   liteiclink 板間互連評估），硬體就緒時啟動、不阻塞軟體主線。
+- v1.10（2026-10-30）：Phase B 第 6 項（prepacking molecules）標記完成
+  （efc v0.11：`efc/prepack.py` 分子框架 + pack.py atomic 裝箱，QoR
+  golden 零漂移守門）；carry8 端到端待前端算術推斷。下一步進入 7
+  （floorplanning constraints）。

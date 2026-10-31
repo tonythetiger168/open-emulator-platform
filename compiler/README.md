@@ -19,6 +19,7 @@ cut-enumeration LUT mapping、SAT-based LEC 等價驗證），並可輸出
 | 技術映射 gates→LUT6 + INIT | `efc/techmap.py` + `efc/cutmap.py` | Technology Mapper（Technology view） |
 | LEC 等價驗證（generic vs mapped netlist） | `efc/lec.py` | Formality/LEC（Yosys equiv_make/simple/induct） |
 | 架構描述（JSON，data-driven） | `efc/arch.py` + `arch/vp1902.json` | —（VPR architecture XML 對應） |
+| Prepack molecules（lutff/carry8） | `efc/prepack.py` | —（VPR prepacker 對應） |
 | CLB 打包（8×LUT6+16FF） | `efc/pack.py` | —（VP1902 slice 結構，BLE packing） |
 | Placement（smart-centroid seed + SA） | `efc/place.py` | —（自研 P&R，VPR 式） |
 | Routing（A* timing-driven PathFinder） | `efc/route.py` | 同上 |
@@ -51,6 +52,8 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 `--mapper {cut,greedy}` 切換 LUT mapper（預設 cut-enumeration，greedy 供 A/B）。
 `--lec` 對 mapping 結果跑 SAT 等價驗證（需 yosys；proven/failed/skipped
 三態，無 yosys 時誠實報 skipped 不偽造通過，failed/error 時 CLI exit 1）。
+編譯報表的 `molecules` 行顯示 prepack 分子統計
+（single/lutff/carry8，v0.11 起，QoR golden 追蹤項之一）。
 `--xc7 out.v` 輸出 7-series primitives Verilog（LUT1–6/FDRE/IBUF/OBUF，
 搭配 `--arch xc7k325t`），接續指令：
 
@@ -98,6 +101,9 @@ python3 -m efc.qor --check    # 比對 golden，有任何確定性漂移即 exit
 8. QoR golden（`benchmarks/golden.json`）鎖的是**當前演算法行為**而非
    品質上界——允許故意改進時以 `--update` 重記（應在 commit message 說明
    哪些指標變動、為何可接受）；runtime 欄位永不斷言，僅供漂移參考。
+9. prepack 的 **carry8 分子框架已落地（v0.11）但尚無端到端來源**：
+   Verilog 子集無 `+` 算子，CARRY8 chain 目前經 `LutNet.carry_chains`
+   標註注入（單元測試覆蓋）；BRAM/DSP58 分子同理，待前端推斷落地後啟用。
 
 ## Roadmap
 
@@ -115,6 +121,8 @@ python3 -m efc.qor --check    # 比對 golden，有任何確定性漂移即 exit
       輸出，Yosys→JSON 段已驗證；bitstream 段待 nextpnr-xilinx chipdb 環境）
 - [x] QoR golden 回歸系統（v0.10：`efc/qor.py` + `benchmarks/` 5 設計語料，
       確定性指標精確比對、runtime 僅記錄漂移，LEC 納入 golden）
+- [x] Prepacking molecules（v0.11：`efc/prepack.py`，lutff 強制配對框架化 +
+      carry8 鏈分子（容量/歸屬校驗，atomic 打包）；BRAM/DSP 待前端推斷）
 - [ ] 固定 shell + runtime patch（overlay/PR）評估：迭代編譯去 Vivado 化；
       注意 overlay 面積 overhead 約 2–10×，僅適合中小設計快速迭代
 - [ ] multi-FPGA partition（對齊 roadmap Phase 2，參考 Siemens VPS）
