@@ -1,6 +1,6 @@
 # efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.8
+> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.9
 > 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
 > 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
 > roadmap 的展開與具體化。
@@ -116,6 +116,23 @@
     pre-implemented blocks 直接對應「固定 shell + 局部 patch」，站在 AMD 官方
     開源框架上做，省去自行操作 DCP。
 
+13. **除錯觀測層整合評估**（2026-10-30 GitHub 生態掃描新增，詳見
+    `docs/emulator-tools-landscape.md` §3）：emulator 上版後的內部訊號
+    觀測不必自研——評估 [litescope](https://github.com/enjoy-digital/litescope)
+    （212★，ILA 開源對應，LiteX 匯流排）與
+    [fpgacapZero](https://github.com/lcapossio/fpgacapZero)（136★，
+    vendor-agnostic embedded LA + IO + JTAG-AXI，不依賴 Vivado ILA，
+    與無 Vivado 路線相容）擇一整合；回讀波形後端用
+    [GTKWave](https://github.com/gtkwave/gtkwave)（1,041★）。
+
+14. **主機通道選型評估**（同上掃描新增，詳見 landscape §2）：ProtoBoard
+    host 介面二選一——[LitePCIe](https://github.com/enjoy-digital/litepcie)
+    （740★，開源 core + Linux/Windows 驅動，無 Vivado 路線相容）vs
+    Vivado XDMA IP（參考 WangXuan95 教學 867★）；多板互連物理層評估
+    [liteiclink](https://github.com/enjoy-digital/liteiclink)（68★，
+    SerDes/SFP inter-chip link），方法學參考 FireSim supernode 的
+    TDM 排程。
+
 ## 3. 執行順序
 
 ```
@@ -125,6 +142,8 @@
 → 11 ✅（v0.10） （QoR 回歸系統： benchmark corpus + golden 追蹤）
 → 6, 7           （對齊商用結構、鋪 multi-FPGA partition 的路）
 → 8, 12          （按資源排）
+→ 13, 14         （生態整合評估： 除錯觀測層、主機通道選型——
+                  硬體就緒時啟動，不阻塞軟體主線）
 ```
 
 RL / ML move selection（RLPlace、VPR-Evolve 路線）留作前瞻：benchmark
@@ -158,3 +177,9 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
   確定性指標精確比對、runtime 僅記漂移、LEC 納入 golden）；RL/ML 前瞻
   的前置條件（corpus）已滿足。下一步進入 6/7（商用結構對齊：
   prepacking molecules、floorplanning constraints）。
+- v1.9（2026-10-30）：新增 GitHub emulator 工具生態掃描
+  （`docs/emulator-tools-landscape.md` v1.0）——確認 ZeBu/Palladium 級
+  emulator compiler 無開源對應（本專案差異化明確），FireSim 為方法學
+  最近對標；據此新增 Phase C 第 13 項（除錯觀測層：LiteScope /
+  fpgacapZero 評估）與第 14 項（主機通道：LitePCIe vs XDMA、
+  liteiclink 板間互連評估），硬體就緒時啟動、不阻塞軟體主線。
