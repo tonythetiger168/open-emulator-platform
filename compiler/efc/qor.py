@@ -6,12 +6,13 @@ area, runtime — so a change that fixes A but breaks B is caught by
 `python -m efc.qor --check` (exit 1 on any deterministic drift).
 
 Deterministic metrics (exact match against golden): LUTs, DFF, PI, PO,
-CLB_used, logic_depth_LUT, critical_path_ns, placement_hpwl,
-route_wirelength, route_max_channel, route_overused_channels,
-route_expanded_nodes, lec status. runtime_s is recorded and reported
-with drift %, but NEVER asserted (machine-dependent). LEC is part of
-the golden record; a "skipped" current run (no yosys) is neutral, never
-a fake pass nor a fake regression.
+molecules (prepack summary), CLB_used, logic_depth_LUT,
+critical_path_ns, placement_hpwl, route_wirelength, route_max_channel,
+route_overused_channels, route_expanded_nodes, lec status. runtime_s is
+recorded and reported with drift %, but NEVER asserted
+(machine-dependent). LEC is part of the golden record; a "skipped"
+current run (no yosys) is neutral, never a fake pass nor a fake
+regression.
 
 Grid sizing: fabric IO capacity is 2*grid slots per direction class, so
 each benchmark gets grid = max(8, ceil(max(PI,PO)/2) + 2) — deterministic,
@@ -33,10 +34,10 @@ BENCH_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
                          "benchmarks")
 GOLDEN = os.path.join(BENCH_DIR, "golden.json")
 
-DETERMINISTIC = ["LUTs", "DFF", "PI", "PO", "CLB_used", "logic_depth_LUT",
-                 "critical_path_ns", "placement_hpwl", "route_wirelength",
-                 "route_max_channel", "route_overused_channels",
-                 "route_expanded_nodes", "lec"]
+DETERMINISTIC = ["LUTs", "DFF", "PI", "PO", "molecules", "CLB_used",
+                 "logic_depth_LUT", "critical_path_ns", "placement_hpwl",
+                 "route_wirelength", "route_max_channel",
+                 "route_overused_channels", "route_expanded_nodes", "lec"]
 CP_TOL = 1e-12  # ns; float ops are deterministic, allow only repr noise
 
 

@@ -1,10 +1,14 @@
 """CLB packing for VP1902: each CLB (Versal slice) = 8 x LUT6 + 16 x FF.
 
-Strategy: pair a LUT with the DFF it exclusively drives (LUT->DFF same CLB,
-the classic BLE pattern), then first-fit bin-pack remaining cells into CLBs,
-preferring blocks that share nets.
+v0.11: consumes prepack molecules (efc/prepack.py) atomically — lutff
+forced pairs and carry8 chains seed their own CLB block, single cells
+first-fit by shared nets (LUTs scored by net sharing, FFs first-fit).
+On designs without carry chains the packing is bit-identical to v0.10
+(guarded by the qor.py golden).
 """
 from dataclasses import dataclass, field
+
+from .prepack import prepack
 
 CLB_LUTS, CLB_FFS = 8, 16
 
@@ -20,29 +24,10 @@ class Block:
 def pack(mapped):
     """-> (blocks, ext_nets)
     ext_nets: net id -> [('blk', i) | ('io', net), ...]  (driver first)."""
-    luts, dffs = list(mapped.luts), list(mapped.dffs)
+    return pack_molecules(prepack(mapped), mapped)
 
-    # net -> consuming cells, and net -> driving cell
-    fanout = {}
-    for c in luts + dffs:
-        for n in c.ins:
-            fanout.setdefault(n, []).append(c)
-    lut_by_out = {c.out: c for c in luts}
-
+def pack_molecules(molecules, mapped):
     blocks = []
-    used_lut, used_ff = set(), set()
-
-    # 1) LUT->DFF exclusive pairs
-    for f in dffs:
-        d = f.ins[0]
-        drv = lut_by_out.get(d)
-        if drv is not None and len(fanout.get(d, [])) == 1:
-            b = Block([drv], [f])
-            blocks.append(b)
-            used_lut.add(id(drv)); used_ff.add(id(f))
-    # 2) remaining cells
-    rest_luts = [c for c in luts if id(c) not in used_lut]
-    rest_ffs = [c for c in dffs if id(c) not in used_ff]
 
     def nets_of(b):
         s = set()
@@ -50,28 +35,33 @@ def pack(mapped):
             s.update(c.ins); s.add(c.out)
         return s
 
-    for c in rest_luts:
-        best, best_share = None, 0
-        cn = set(c.ins) | {c.out}
-        for b in blocks:
-            if b.fits(lut_add=1):
-                share = len(cn & nets_of(b))
-                if share > best_share:
-                    best, best_share = b, share
-        if best is None:
-            best = Block()
-            blocks.append(best)
-        best.luts.append(c)
-    for c in rest_ffs:
-        best = None
-        for b in blocks:
-            if b.fits(ff_add=1):
-                best = b
-                break
-        if best is None:
-            best = Block()
-            blocks.append(best)
-        best.ffs.append(c)
+    for m in molecules:
+        if m.kind in ("lutff", "carry8"):
+            blocks.append(Block(list(m.luts), list(m.ffs)))
+            continue
+        c = m.cells[0]  # single
+        if c.type == "DFF":
+            best = None
+            for b in blocks:
+                if b.fits(ff_add=1):
+                    best = b
+                    break
+            if best is None:
+                best = Block()
+                blocks.append(best)
+            best.ffs.append(c)
+        else:
+            best, best_share = None, 0
+            cn = set(c.ins) | {c.out}
+            for b in blocks:
+                if b.fits(lut_add=1):
+                    share = len(cn & nets_of(b))
+                    if share > best_share:
+                        best, best_share = b, share
+            if best is None:
+                best = Block()
+                blocks.append(best)
+            best.luts.append(c)
 
     # external nets (internal CLB nets = driven and consumed inside one block)
     cell_blk = {}

@@ -4,6 +4,7 @@
     "DFF": 4,
     "PI": 10,
     "PO": 4,
+    "molecules": "single=0 lutff=4 carry8=0",
     "CLB_used": 4,
     "logic_depth_LUT": 1,
     "critical_path_ns": 0.1198,
@@ -14,13 +15,14 @@
     "route_expanded_nodes": 280,
     "lec": "proven (12/12 equiv cells)",
     "grid": 8,
-    "runtime_s": 0.1085
+    "runtime_s": 0.1252
   },
   "maj4": {
     "LUTs": 4,
     "DFF": 4,
     "PI": 17,
     "PO": 4,
+    "molecules": "single=0 lutff=4 carry8=0",
     "CLB_used": 4,
     "logic_depth_LUT": 1,
     "critical_path_ns": 0.1198,
@@ -31,13 +33,14 @@
     "route_expanded_nodes": 682,
     "lec": "proven (12/12 equiv cells)",
     "grid": 11,
-    "runtime_s": 0.1347
+    "runtime_s": 0.1564
   },
   "mixer8": {
     "LUTs": 8,
     "DFF": 8,
     "PI": 25,
     "PO": 8,
+    "molecules": "single=0 lutff=8 carry8=0",
     "CLB_used": 8,
     "logic_depth_LUT": 1,
     "critical_path_ns": 0.1396,
@@ -48,13 +51,14 @@
     "route_expanded_nodes": 2433,
     "lec": "proven (24/24 equiv cells)",
     "grid": 15,
-    "runtime_s": 0.3925
+    "runtime_s": 0.4753
   },
   "regpipe8": {
     "LUTs": 16,
     "DFF": 16,
     "PI": 25,
     "PO": 8,
+    "molecules": "single=0 lutff=16 carry8=0",
     "CLB_used": 16,
     "logic_depth_LUT": 1,
     "critical_path_ns": 0.1898,
@@ -65,13 +69,14 @@
     "route_expanded_nodes": 1999,
     "lec": "proven (48/48 equiv cells)",
     "grid": 15,
-    "runtime_s": 0.933
+    "runtime_s": 1.1249
   },
   "sel4": {
     "LUTs": 4,
     "DFF": 4,
     "PI": 10,
     "PO": 4,
+    "molecules": "single=0 lutff=4 carry8=0",
     "CLB_used": 4,
     "logic_depth_LUT": 1,
     "critical_path_ns": 0.1198,
@@ -82,6 +87,6 @@
     "route_expanded_nodes": 280,
     "lec": "proven (12/12 equiv cells)",
     "grid": 8,
-    "runtime_s": 0.1054
+    "runtime_s": 0.1146
   }
 }

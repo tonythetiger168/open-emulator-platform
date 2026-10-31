@@ -8,6 +8,7 @@ Pipeline (Synplify Pro analogue):
   lec.py      SAT equivalence check      ~ Formality/LEC (via Yosys equiv)
   arch.py     device arch spec (JSON)    ~ VPR architecture XML
   fabric.py   logical grid from arch     ~ VPR grid builder
+  prepack.py  molecule grouping          ~ VPR prepacker (lutff/carry8)
   pack.py     CLB packing (8 LUT6+16 FF) ~ VP1902 slice structure
   place.py    SA placement (block level) ~ self-developed P&R, VPR-style
   route.py    A* timing-driven PathFinder ~ self-developed P&R
@@ -16,4 +17,4 @@ Pipeline (Synplify Pro analogue):
   xc7out.py   7-series primitive Verilog ~ OpenXC7/nextpnr-xilinx (no Vivado)
   qor.py      QoR golden regression       ~ VTR golden-QoR tracking
 """
-__version__ = "0.10.0"
+__version__ = "0.11.0"

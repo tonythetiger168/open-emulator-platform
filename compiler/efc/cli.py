@@ -7,7 +7,8 @@ import argparse, json, sys
 from .verilog import parse_verilog
 from .netlist import elaborate
 from .techmap import techmap, stats
-from .pack import pack
+from .prepack import prepack, molecule_stats
+from .pack import pack_molecules
 from .arch import load_arch, DEFAULT_ARCH
 from .fabric import build_fabric, utilization
 from .place import place
@@ -27,7 +28,8 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
     if lec:
         from .lec import run_lec
         lec_res = run_lec(nl, mapped)
-    blocks, ext_nets = pack(mapped)
+    molecules = prepack(mapped)
+    blocks, ext_nets = pack_molecules(molecules, mapped)
     fab = build_fabric(grid, tracks, nl.inputs, nl.outputs, arch=spec)
     blk_at, hpwl = place(blocks, ext_nets, fab, seed=seed)
 
@@ -66,6 +68,7 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
         "mapper": mapper,
         "target": spec.part,
         **stats(nl, mapped, spec.clb.lut_k),
+        "molecules": molecule_stats(molecules),
         "CLB_used": len(blocks),
         f"{spec.name.upper()}_LUT6_util_%": round(util["LUT6"], 6),
         f"{spec.name.upper()}_FF_util_%": round(util["FF"], 6),
