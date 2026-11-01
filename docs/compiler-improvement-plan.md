@@ -1,6 +1,6 @@
 # efc 改進計劃：對標 GitHub 開源 FPGA / P&R 專案
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.10
+> open-emulator-platform 專案 ｜ 2026-11-01 ｜ v1.11
 > 目的：掃描 GitHub 上主流開源 FPGA 綜合與 P&R 專案，萃取可落地的演算法與架構設計，
 > 排定 efc（`compiler/`）的改進優先序。本文是《單顆 FPGA Compiler 架構設計書》
 > roadmap 的展開與具體化。
@@ -78,11 +78,30 @@
    `LutNet.carry_chains` 標註注入、單元測試覆蓋）；BRAM/DSP58 分子
    框架已可容納，待記憶體/DSP 推斷落地後啟用。
 
-7. **Floorplanning constraints**（VTR 9 新增能力）：對應 emulator 的 module 級
-   floorplan，更是 multi-FPGA partition（Phase 2）的前置能力。戰略價值高。
+7. **Floorplanning constraints** —— ✅ **已完成（v0.12，2026-11-01）**：
+   落地 `efc/floorplan.py`——JSON 約束（regions：`rect` + cell 名選擇器 +
+   `exclusive` 保留區；`fixed`：精確鎖定 slot）；resolve 階段即做
+   可行性檢查（rect 越界/雙重區域/雙重鎖定/容量不足一律
+   FloorplanError，不放行到 placement）；placer 全程強制——centroid
+   種子鉗制在 rect 內、legalization 只搜區內空槽、fixed block 免於
+   SA、SA 只提議合法 move；post-place `verify_floorplan()` 複審，
+   違例即 fail build（絕不靜默降級）。`--floorplan` CLI 接入；
+   floorplan=None 時與 v0.11 **bit-identical**（QoR golden 5/5 零漂移
+   守門）；新增 `tests/test_floorplan.py` 11 項（共 82 項全過）。
+   multi-FPGA partition（Phase 2）前置能力就此鋪通。
 
-8. **平行 / flat routing**（VTR 9 AIR router：空間分割平行化降 2.4× routing 時間）：
-   設計規模上來後再做，為大設計準備。
+8. **平行 / flat routing** —— ✅ **框架已完成（v0.13，2026-11-01）**：
+   VTR 9 AIR router 路線——空間分割（垂直 strip）把 net 分為 global
+   （跨 strip，序列先繞，佔有 cut edge）與 local（strip 內，
+   multiprocessing 平行，worker 以 global nets 佔用 occ0 為種子繞開），
+   合併後 any overuse → 自動退回完整序列 PathFinder（結果與 route()
+   逐位相同，文件化 fallback）。`route()` 加 `occ0/hist0`（預設
+   None 行為不變）；`--route-par`/`--workers` CLI 接入。**誠實標記**：
+   benchmark 級距（grid 8–15）無 speedup 宣稱——本項價值是規模化
+   時不再需要新程式碼（原計劃「設計規模上來後再做」的框架提前落地）；
+   平行模式 5/5 benchmark wirelength 與序列模式一致、expanded_nodes
+   偏差 <0.2%、重複執行 bit-identical（測試斷言）。
+   新增 `tests/test_routepar.py` 7 項（共 89 項全過）。
 
 ### Phase C：正確性驗證與生態落地
 
@@ -123,26 +142,35 @@
     上界，故意改進時以 `--update` 重記並在 commit message 說明；語料規模
     仍為自製小設計（MCNC/Koios 級語料待 Verilog 子集擴充後引入）。
 
-12. **shell+patch 線用 RapidWright 落地**（原 roadmap 第 7 項具體化）：
-    pre-implemented blocks 直接對應「固定 shell + 局部 patch」，站在 AMD 官方
-    開源框架上做，省去自行操作 DCP。
+12. **shell+patch 線用 RapidWright 落地** —— ✅ **efc 端已完成
+    （v0.14，2026-11-01）**：落地 `efc/shellpatch.py` +
+    `--shell-patch x0,y0,x1,y1 [--shell-patch-out sp.json]`——依擺放位置
+    把 packed blocks 分為 shell/patch（rect 越界即 ValueError），並審計
+    boundary nets（跨區 net 逐條回報兩側 terminal 數，含 IO pad 側——
+    正是 RP partition pin 介面的輸入）。交接文件
+    `docs/rapidwright-shell-patch.md`：partition JSON → RapidWright
+    BlockStitcher/stamped modules 映射、保留 shell DCP→迭代只重作
+    patch 的流程、邏輯網格→真實 Pblock 座標映射校準點、fallback
+    （OpenXC7 線降級為全量重編譯）。**誠實標記**：Java + Vivado 側在
+    沙箱外執行，efc 不偽造該段；carry8 分子跨邊界須整鏈歸同一側
+    （推薦歸 patch）。新增 `tests/test_shellpatch.py` 7 項。
 
-13. **除錯觀測層整合評估**（2026-10-30 GitHub 生態掃描新增，詳見
-    `docs/emulator-tools-landscape.md` §3）：emulator 上版後的內部訊號
-    觀測不必自研——評估 [litescope](https://github.com/enjoy-digital/litescope)
-    （212★，ILA 開源對應，LiteX 匯流排）與
-    [fpgacapZero](https://github.com/lcapossio/fpgacapZero)（136★，
-    vendor-agnostic embedded LA + IO + JTAG-AXI，不依賴 Vivado ILA，
-    與無 Vivado 路線相容）擇一整合；回讀波形後端用
-    [GTKWave](https://github.com/gtkwave/gtkwave)（1,041★）。
+13. **除錯觀測層整合評估** —— ✅ **評估完成（2026-11-01）**：
+    交付 `docs/debug-observation-eval.md`——litescope（212★）vs
+    fpgacapZero（136★，2026-10-31 仍活躍）逐維度比較，**建議 fpgacapZero
+    為主**（JTAG-AXI 獨立除錯通道，不搶 host 頻寬、不污染 timing
+    量測；vendor-agnostic 與無 Vivado 路線一致），litescope 為備
+    （support SoC 定案 LiteX 且除錯走系統匯流排可接受時）。整合本身
+    （訊號清單自 efc ext_nets/floorplan 產生、GTKWave/FST 收尾、對
+    Verilator golden 逐週期驗收）待硬體就緒啟動，不阻塞軟體主線。
 
-14. **主機通道選型評估**（同上掃描新增，詳見 landscape §2）：ProtoBoard
-    host 介面二選一——[LitePCIe](https://github.com/enjoy-digital/litepcie)
-    （740★，開源 core + Linux/Windows 驅動，無 Vivado 路線相容）vs
-    Vivado XDMA IP（參考 WangXuan95 教學 867★）；多板互連物理層評估
-    [liteiclink](https://github.com/enjoy-digital/liteiclink)（68★，
-    SerDes/SFP inter-chip link），方法學參考 FireSim supernode 的
-    TDM 排程。
+14. **主機通道選型評估** —— ✅ **評估完成（2026-11-01）**：
+    交付 `docs/host-channel-eval.md`——**建議 LitePCIe 為主**（MIT、
+    無 Vivado 依賴是硬條件；XDMA 會把工具鏈綁回 Vivado，使 OpenXC7 與
+    shell+patch 替代路線作廢；頻寬瓶頸時退路 verilog-pcie 1,677★）；
+    板間互連評估 liteiclink（68★）+ FireSim supernode TDM 方法學，
+    **誠實標記**成熟度較低、上板前需 loopback BER 驗收。上板整合待
+    ProtoBoard 硬體定案。
 
 ## 3. 執行順序
 
@@ -152,11 +180,17 @@
 → 10 ✅（v0.8）→ 9 ✅（v0.9）  （正確性驗證與靶機後端收口）
 → 11 ✅（v0.10） （QoR 回歸系統： benchmark corpus + golden 追蹤）
 → 6 ✅（v0.11）  （prepacking molecules： lutff 框架化 + carry8 鏈）
-→ 7              （floorplanning constraints： 鋪 multi-FPGA partition 的路）
-→ 8, 12          （按資源排）
-→ 13, 14         （生態整合評估： 除錯觀測層、主機通道選型——
-                  硬體就緒時啟動，不阻塞軟體主線）
+→ 7 ✅（v0.12）  （floorplanning constraints： multi-FPGA partition 的路鋪通）
+→ 8 ✅（v0.13）  （空間分割平行 routing 框架： 規模化不再需要新程式碼）
+→ 12 ✅（v0.14） （shell+patch 分區 + RapidWright 交接文件）
+→ 13, 14 ✅      （除錯觀測層、主機通道選型評估交付——
+                  上板整合待硬體就緒，不阻塞軟體主線）
 ```
+
+**Phase A/B/C 十四項至此全數收口**（完成 1–14；13/14 為評估交付，
+實體整合待 ProtoBoard 硬體就緒）。後續主線：BRAM/DSP58 推斷與
+Verilog 子集擴充（解放 carry8 端到端與 MCNC/Koios 級語料）、
+multi-FPGA partition（Phase 2）、RL/ML move selection（前瞻）。
 
 RL / ML move selection（RLPlace、VPR-Evolve 路線）留作前瞻：benchmark
 corpus 已於 v0.10 建立（前置條件滿足），可考慮用 RL agent 或 LLM-driven
@@ -199,3 +233,12 @@ pass 下沉到 C++，或直接利用 nextpnr 的架構 API，而非在 Python �
   （efc v0.11：`efc/prepack.py` 分子框架 + pack.py atomic 裝箱，QoR
   golden 零漂移守門）；carry8 端到端待前端算術推斷。下一步進入 7
   （floorplanning constraints）。
+- v1.11（2026-11-01）：Phase B 第 7/8 項、Phase C 第 12/13/14 項標記完成
+  （efc v0.12 floorplanning constraints——regions/fixed/exclusive + 全程
+  強制 + post-place 驗證；v0.13 空間分割平行 routing——global 序列 +
+  per-strip locals 多行程式平行 + overuse 自動退回序列；v0.14
+  shell+patch 分區 + boundary net 審計 + RapidWright 交接文件；
+  `docs/debug-observation-eval.md` 建議 fpgacapZero 為主、
+  `docs/host-channel-eval.md` 建議 LitePCIe 為主 + liteiclink 板間互連）。
+  **十四項全數收口**（剩餘為硬體就緒後的實體整合）。全程 QoR golden
+  5/5 零漂移守門（runtime 僅漂移不斷言），96 項單元測試全過。
