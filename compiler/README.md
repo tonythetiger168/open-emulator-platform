@@ -22,7 +22,10 @@ cut-enumeration LUT mapping、SAT-based LEC 等價驗證），並可輸出
 | Prepack molecules（lutff/carry8） | `efc/prepack.py` | —（VPR prepacker 對應） |
 | CLB 打包（8×LUT6+16FF） | `efc/pack.py` | —（VP1902 slice 結構，BLE packing） |
 | Placement（smart-centroid seed + SA） | `efc/place.py` | —（自研 P&R，VPR 式） |
+| Floorplanning constraints（`--floorplan`） | `efc/floorplan.py` | —（VPR 9 floorplan constraints 對應） |
 | Routing（A* timing-driven PathFinder） | `efc/route.py` | 同上 |
+| 平行 routing（`--route-par`） | `efc/routepar.py` | —（VTR 9 AIR router 式空間分割） |
+| Shell+patch 分區（`--shell-patch`） | `efc/shellpatch.py` | —（RapidWright pre-implemented blocks） |
 | STA（Elmore + slack/criticality） | `efc/timing.py` | Timing Analyst |
 | EDIF/XDC 輸出 | `efc/edif.py` | Synplify 的 EDIF+SDC 出貨格式 |
 | 7-series primitives 輸出（`--xc7`） | `efc/xc7out.py` | —（OpenXC7/nextpnr-xilinx 無 Vivado 路徑） |
@@ -54,6 +57,15 @@ STA 與 XDC 的時脈週期（ns），違例時 CLI 以 exit 1 回報。
 三態，無 yosys 時誠實報 skipped 不偽造通過，failed/error 時 CLI exit 1）。
 編譯報表的 `molecules` 行顯示 prepack 分子統計
 （single/lutff/carry8，v0.11 起，QoR golden 追蹤項之一）。
+`--floorplan fp.json` 施加 floorplan 約束（regions/fixed/exclusive，
+v0.12），resolve 階段先做可行性檢查，placement 全程強制，post-place
+複審違例即 fail build。
+`--route-par [--workers N]` 走空間分割平行 routing（v0.13：global nets
+序列、per-strip locals 多行程式平行；合併後 any overuse 自動退回
+序列 PathFinder）。
+`--shell-patch x0,y0,x1,y1 [--shell-patch-out sp.json]` 輸出
+shell/patch 分區 + boundary net 審計（v0.14，RapidWright 交接文件見
+`docs/rapidwright-shell-patch.md`）。
 `--xc7 out.v` 輸出 7-series primitives Verilog（LUT1–6/FDRE/IBUF/OBUF，
 搭配 `--arch xc7k325t`），接續指令：
 
@@ -123,6 +135,20 @@ python3 -m efc.qor --check    # 比對 golden，有任何確定性漂移即 exit
       確定性指標精確比對、runtime 僅記錄漂移，LEC 納入 golden）
 - [x] Prepacking molecules（v0.11：`efc/prepack.py`，lutff 強制配對框架化 +
       carry8 鏈分子（容量/歸屬校驗，atomic 打包）；BRAM/DSP 待前端推斷）
+- [x] Floorplanning constraints（v0.12：`efc/floorplan.py`，regions/fixed/
+      exclusive，placer 全程強制 + post-place 驗證，`--floorplan`；
+      multi-FPGA partition 的前置能力）
+- [x] 空間分割平行 routing（v0.13：`efc/routepar.py`，VTR 9 AIR 式——
+      global nets 序列、per-strip locals 多行程式平行，佔用衝突自動
+      退回序列 PathFinder，`--route-par`；benchmark 級距暫無 speedup 宣稱）
+- [x] Shell+patch 分區（v0.14：`efc/shellpatch.py` + `--shell-patch`——
+      patch/shell 分類 + boundary net 審計，RapidWright 交接文件
+      `docs/rapidwright-shell-patch.md`；Vivado 側在沙箱外執行）
 - [ ] 固定 shell + runtime patch（overlay/PR）評估：迭代編譯去 Vivado 化；
       注意 overlay 面積 overhead 約 2–10×，僅適合中小設計快速迭代
-- [ ] multi-FPGA partition（對齊 roadmap Phase 2，參考 Siemens VPS）
+      （v0.14 的 shell+patch 分區是本項的 efc 側前置）
+- [ ] multi-FPGA partition（對齊 roadmap Phase 2，參考 Siemens VPS；
+      v0.12 floorplan constraints 已鋪路）
+- [x] 除錯觀測層 / 主機通道選型評估（`docs/debug-observation-eval.md`：
+      fpgacapZero 為主；`docs/host-channel-eval.md`：LitePCIe 為主 +
+      liteiclink 板間互連；硬體就緒時啟動整合）
