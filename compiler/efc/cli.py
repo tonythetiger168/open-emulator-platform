@@ -18,7 +18,8 @@ from .edif import write_edif, write_xdc
 
 def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
                  arch=DEFAULT_ARCH, clock_ns=10.0, mapper="cut", lec=False,
-                 xc7=None):
+                 xc7=None, floorplan=None, route_par=False, workers=None,
+                 shell_patch=None, shell_patch_out=None):
     spec = load_arch(arch) if not hasattr(arch, "envelope") else arch
     src = open(path, encoding="utf-8").read()
     mod = parse_verilog(src)
@@ -31,7 +32,16 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
     molecules = prepack(mapped)
     blocks, ext_nets = pack_molecules(molecules, mapped)
     fab = build_fabric(grid, tracks, nl.inputs, nl.outputs, arch=spec)
-    blk_at, hpwl = place(blocks, ext_nets, fab, seed=seed)
+    fp = None
+    if floorplan:
+        from .floorplan import make_floorplan, verify_floorplan
+        fp = make_floorplan(floorplan, blocks, fab)
+    blk_at, hpwl = place(blocks, ext_nets, fab, seed=seed, floorplan=fp)
+    if fp is not None:
+        bad = verify_floorplan(blocks, blk_at, fab, fp)
+        if bad:
+            raise RuntimeError("floorplan violated post-placement: "
+                               + "; ".join(bad))
 
     # routing demands: driver terminal first
     drv_blk = {}
@@ -57,7 +67,12 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
     # placement-aware STA (Elmore wire delay from arch spec) — runs pre-route
     # so the A* router can consume per-net criticality (VPR-style flow).
     st = sta(mapped, ext_nets, blk_at, fab, clock_ns=clock_ns, arch=spec)
-    rr = route(demands, grid, tracks, crit=st["criticality"], arch=spec)
+    if route_par:
+        from .routepar import route_par as _rp
+        rr = _rp(demands, grid, tracks, bins=4, workers=workers,
+                 crit=st["criticality"], arch=spec)
+    else:
+        rr = route(demands, grid, tracks, crit=st["criticality"], arch=spec)
 
     n_luts = len(mapped.luts)
     n_ffs = len(mapped.dffs)
@@ -81,6 +96,27 @@ def compile_file(path, grid=8, tracks=8, seed=1, edif=None, xdc=None,
         "route_expanded_nodes": rr["expanded_nodes"],
         "logic_depth_LUT": logic_depth(mapped),
     }
+    if fp is not None:
+        rep["floorplan"] = (f"regions={len(fp.regions)} "
+                            f"fixed={len(fp.block_fixed)} violations=0")
+    if route_par:
+        rep["route_mode"] = rr.get("route_mode", "par")
+        rep["route_par"] = (f"bins={rr.get('route_par_bins')} "
+                            f"global={rr.get('route_par_global')} "
+                            f"local={rr.get('route_par_local')} "
+                            f"fallback={rr.get('route_par_fallback')}")
+    if shell_patch:
+        from .shellpatch import partition_shell_patch
+        sp = partition_shell_patch(blocks, blk_at, ext_nets, fab,
+                                   tuple(shell_patch))
+        rep["shell_patch"] = (f"rect={sp['patch_rect']} "
+                              f"patch={sp['stats']['patch']} "
+                              f"shell={sp['stats']['shell']} "
+                              f"boundary_nets={sp['stats']['boundary_nets']}")
+        if shell_patch_out:
+            json.dump(sp, open(shell_patch_out, "w"), indent=2,
+                      ensure_ascii=False)
+            rep["shell_patch_json"] = shell_patch_out
     if lec_res is not None:
         rep["lec"] = (lec_res["status"] if lec_res["status"] != "proven"
                       else f"proven ({lec_res['proven']}/{lec_res['total']} equiv cells)")
@@ -123,12 +159,29 @@ def main(argv=None):
     ap.add_argument("--xdc", help="write XDC constraints skeleton")
     ap.add_argument("--xc7", help="write 7-series primitive Verilog (LUTn/FDRE/IBUF/OBUF) "
                                   "for the OpenXC7/nextpnr-xilinx Vivado-free flow")
+    ap.add_argument("--floorplan", help="JSON floorplan constraints (regions / fixed locks); "
+                                        "violations fail the build")
+    ap.add_argument("--route-par", action="store_true",
+                    help="spatial-partition parallel routing (globals sequential, "
+                         "per-strip locals in parallel workers)")
+    ap.add_argument("--workers", type=int, default=None,
+                    help="parallel router worker processes (default: min(bins, cpu))")
+    ap.add_argument("--shell-patch", metavar="X0,Y0,X1,Y1",
+                    help="partition the placed design into shell + patch(rect) "
+                         "for the RapidWright pre-implemented-blocks flow")
+    ap.add_argument("--shell-patch-out", metavar="FILE",
+                    help="write the shell/patch partition JSON (needs --shell-patch)")
     ap.add_argument("--json")
     args = ap.parse_args(argv)
     rep = compile_file(args.verilog, args.grid, args.tracks, args.seed,
                        edif=args.edif, xdc=args.xdc, arch=args.arch,
                        clock_ns=args.clock, mapper=args.mapper, lec=args.lec,
-                       xc7=args.xc7)
+                       xc7=args.xc7, floorplan=args.floorplan,
+                       route_par=args.route_par, workers=args.workers,
+                       shell_patch=(tuple(int(v) for v in
+                                    args.shell_patch.split(","))
+                                    if args.shell_patch else None),
+                       shell_patch_out=args.shell_patch_out)
     for k, v in rep.items():
         print(f"{k:24s}: {v}")
     if args.json:
