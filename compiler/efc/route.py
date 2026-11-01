@@ -23,6 +23,11 @@ overused edges and pres_fac grows geometrically until no overuse (or
 max_iter). Falls back to penalty-free A* for any sink that cannot reach its
 target under congestion costs.
 
+v0.13 (Phase B item 8): optional occ0/hist0 seed occupancy — routepar.py
+runs local nets of each spatial strip in worker processes on top of the
+already-routed global nets' occupancy. Default None keeps the v0.5-v0.12
+behaviour bit-identical.
+
 Input demands: net -> (src_xy, [sink_xy, ...]); grid nodes are CLB coords,
 4-neighbour edges with capacity = tracks.
 """
@@ -94,22 +99,26 @@ def _astar(tree, sink, n, occ, hist, tracks, pres_fac, delay_w, crit_w):
                 cnt += 1
     return None, expanded
 
-def route(demands, n, tracks, max_iter=12, crit=None, arch=None):
+def route(demands, n, tracks, max_iter=12, crit=None, arch=None,
+          occ0=None, hist0=None):
     """PathFinder with A* directed search.
 
     crit: net -> criticality in [0,1] from timing.sta(); defaults to 0.5
     (neutral delay/congestion mix) for nets without timing data.
     arch: ArchSpec for the per-hop delay weight (unit grid -> 1.0).
+    occ0/hist0: initial edge occupancy / history penalties (routepar.py
+    seeds workers with the already-routed global nets' occupancy) — the
+    default None keeps the v0.5-v0.12 behaviour bit-identical.
     Returns routes/max_channel/tracks/overused/wirelength plus
     expanded_nodes (search effort — the A* vs BFS runtime metric).
     """
     delay_w = _delay_norm(arch)
-    hist = {}
+    hist = dict(hist0) if hist0 else {}
     pres_fac = 1.0
     final = None
     expanded_total = 0
     for _ in range(max_iter):
-        occ = {}
+        occ = dict(occ0) if occ0 else {}
         routes = {}
         for net, (src, sinks) in demands.items():
             crit_w = min(1.0, max(0.0, (crit or {}).get(net, 0.5)))
