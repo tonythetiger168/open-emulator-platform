@@ -1,6 +1,6 @@
 # Emulator 工具生態掃描（GitHub OSS 版圖）
 
-> open-emulator-platform 專案 ｜ 2026-10-30 ｜ v1.0
+> open-emulator-platform 專案 ｜ 2026-11-01 ｜ v1.1
 > 目的：掃描 GitHub 上可支援本 emulator 平台（efc compiler、ProtoBoard、
 > ProtoPartition、runtime）的開源工具，按需求面分類，標示硬識別碼
 > （repo、星數、最近更新），並給出整合建議。星數與更新時間為 2026-10-30
@@ -54,7 +54,31 @@
 3. **除錯與主機介面已有成熟開源件**（LiteScope、fpgacapZero、LitePCIe），
    這兩塊不必自研，列為整合評估項（《改進計劃》第 13、14 項）。
 
-## 6. 建議
+## 6. 相鄰領域參考：OpenROAD（ASIC RTL→GDSII，非 FPGA）
+
+[OpenROAD](https://github.com/The-OpenROAD-Project/OpenROAD)
+（約 3.1k★，2026-11-01 查得；2026 年 8 月 Google 以 principal member
+加入 OpenROAD Initiative）是 ASIC standard-cell 的 RTL→GDSII 全流程
+（Yosys 綜合 + OpenROAD App 做 floorplan → detailed routing）。
+**刻意不列為 efc 對標**：它解的是 ASIC 問題（cell 擺 row、metal layer
+走線、DRC/LVS 簽核），不含 FPGA 的三個核心問題——LUT packing、CLB
+架構約束（8×LUT6+16FF、CARRY8 鏈）、channel/switch-box routing
+（預製佈線資源的壅塞 negotiation）；efc 自研 P&R 正是為這三件事存在。
+可萃取的僅方法學層：
+
+- **OpenSTA**：業界級 golden STA 引擎（SDC、multi-corner）——可作
+  `efc/timing.py` 的外部 oracle 交叉驗證（目前 v0.4 STA 為邏輯模型
+  估計，自用足夠）。
+- **RePlAce**：ePlace 式解析 global placement + density penalty——與
+  nextpnr HeAP 同族，《改進計劃》已經由 HeAP/bound2bound 項涵蓋。
+- **ORFS 自動化方法學**：no-human-in-loop、每級 report/hook——精神同
+  v0.10 QoR golden 回歸，已自行落地。
+
+**例外情境**：若日後 emulator 的 shell/NoC/interposer 或教學板走
+custom ASIC（開源 PDK + OpenLane/LibreLane），OpenROAD 即成第一優先
+對標；目前主線為 VP1902 FPGA，不進改進項。
+
+## 7. 建議
 
 - **短期（整合評估）**：LiteScope / fpgacapZero 擇一做 emulator 除錯
   觀測層；LitePCIe vs XDMA 做主機通道選型——見《改進計劃》Phase C
@@ -66,3 +90,11 @@
 
 相關文件：《單顆 FPGA Compiler 架構設計書》《改進計劃》
 （`docs/compiler-improvement-plan.md`）。
+
+## 版本紀錄
+
+- v1.0（2026-10-30）：初版——模擬方法學／主機介面／除錯觀測性／
+  多 FPGA 互連四面掃描 + Gap 分析 + 建議。
+- v1.1（2026-11-01）：新增 §6 OpenROAD 相鄰領域參考註記（ASIC
+  RTL→GDSII，刻意不列對標的理由、可萃取的方法學、custom ASIC
+  例外情境）；原 §6 建議改為 §7。
